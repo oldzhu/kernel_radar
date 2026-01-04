@@ -1,0 +1,80 @@
+# Example configuration for kernel_radar
+# Copy to config.yaml and customize.
+
+state_file: kernel_radar/state.json
+
+# How items get tagged. Tags are used only for grouping/sorting.
+# Matching is case-insensitive.
+areas:
+  scheduler:
+    keywords:
+      - "sched"
+      - "CFS"
+      - "EEVDF"
+      - "rt"
+      - "deadline"
+      - "load balance"
+      - "util clamp"
+      - "uclamp"
+      - "psi"
+      - "latency"
+    lists:
+      - name: linux-kernel
+        atom: https://lore.kernel.org/linux-kernel/new.atom
+
+  amdgpu:
+    keywords:
+      - "amdgpu"
+      - "drm/amd"
+      - "dri"
+      - "gfx11"
+      - "gfx1151"
+      - "firmware"
+      - "smu"
+      - "kfd"
+      - "dc"
+      - "display"
+    lists:
+      - name: amd-gfx
+        atom: https://lore.kernel.org/amd-gfx/new.atom
+      - name: dri-devel
+        atom: https://lore.kernel.org/dri-devel/new.atom
+
+  cgroups:
+    keywords:
+      - "cgroup"
+      - "cgroup2"
+      - "memory.max"
+      - "io.max"
+      - "cpuset"
+      - "psi"
+    lists:
+      - name: cgroups
+        atom: https://lore.kernel.org/cgroups/new.atom
+
+  namespaces:
+    keywords:
+      - "namespace"
+      - "userns"
+      - "mntns"
+      - "pidns"
+      - "netns"
+      - "cgroupns"
+      - "containers"
+    lists:
+      - name: containers
+        atom: https://lore.kernel.org/containers/new.atom
+
+# Global filters (applied after area matching)
+filters:
+  include_subject_regex:
+    - "\\[PATCH"
+    - "\\[RFC"
+    - "regress"
+    - "BUG"
+    - "fix"
+  exclude_subject_regex: []
+
+limits:
+  max_items_per_area: 40
+  max_total_items: 200

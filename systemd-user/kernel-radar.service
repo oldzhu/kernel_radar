@@ -1,0 +1,7 @@
+[Unit]
+Description=Kernel radar digest (scheduler + amdgpu)
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/mylinux/kernel_radar
+ExecStart=%h/mylinux/kernel_radar/run.sh --since-hours 24

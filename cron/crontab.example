@@ -1,0 +1,10 @@
+# Example cron entry for kernel_radar (daily, 09:15 UTC)
+#
+# 1) Edit the path to match where you cloned this repo.
+# 2) Install with: crontab -e
+#
+# Notes:
+# - Uses bash explicitly.
+# - Logs stdout/stderr to cron/kernel-radar.log under the repo.
+
+15 9 * * * /usr/bin/env bash -lc 'cd "$HOME/mylinux/kernel_radar" && ./run.sh --since-hours 24 >> cron/kernel-radar.log 2>&1'
