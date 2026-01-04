@@ -27,6 +27,7 @@ Small, local “radar” tool to monitor kernel mailing lists (via lore.kernel.o
 ## Notes
 - Uses lore Atom feeds like `https://lore.kernel.org/linux-kernel/new.atom`.
 - Deduping is supported via a local state file (JSON).
+- `config.yaml` is intentionally local-only and ignored by git; commit changes to `config.example.yaml` when you want to share defaults.
 
 ## Optional: systemd user timer (repo-contained, opt-in)
 
