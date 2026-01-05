@@ -47,6 +47,11 @@ Logs:
 
 If you prefer cron, use the example line in `cron/crontab.example` (edit paths as needed).
 
+## Optional: containerized kernel dev env (repo-contained, opt-in)
+
+If you want a clean, reproducible Ubuntu 24.04 environment for kernel build + tooling (while keeping **email sending on the host**), see:
+- [dev/README.md](dev/README.md)
+
 ## Next steps (optional)
 - Add Patchwork and syzbot/regzbot ingestion.
 - Add a “fetch thread mbox + apply + build” assistant that *never sends email without approval*.
