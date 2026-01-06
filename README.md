@@ -55,3 +55,7 @@ If you want a clean, reproducible Ubuntu 24.04 environment for kernel build + to
 ## Next steps (optional)
 - Add Patchwork and syzbot/regzbot ingestion.
 - Add a “fetch thread mbox + apply + build” assistant that *never sends email without approval*.
+
+## Docs
+
+- [docs/upstream-first-patch-workflow.md](docs/upstream-first-patch-workflow.md)
