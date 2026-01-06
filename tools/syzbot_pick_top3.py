@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Pick a small set of "good starter" syzbot issues from syzkaller.appspot.com.
+
+Why this exists
+--------------
+We wanted 3 real kernel issues that:
+- are in upstream (not a downstream tree)
+- have a reproducer (preferably a C reproducer)
+- do not require special hardware
+- are not "too complex" for a first real bugfix patch
+
+Data sources
+------------
+- https://syzkaller.appspot.com/upstream?json=1
+  Returns a JSON list of upstream bugs with only {title, link}.
+  The `link` is relative (e.g. "/bug?extid=...").
+
+- https://syzkaller.appspot.com/bug?extid=...
+  The HTML bug page includes links like:
+    /text?tag=ReproC&x=...
+    /text?tag=ReproSyz&x=...
+    /text?tag=KernelConfig&x=...
+  We scrape those links to detect whether an issue is reproducible.
+
+Usage
+-----
+  ./tools/syzbot_pick_top3.py
+  ./tools/syzbot_pick_top3.py --count 3 --scan-limit 400
+
+Notes
+-----
+This is intentionally "dumb but transparent" scraping. It is good enough for
+building a shortlist, and you can refine the keyword filters over time.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+import time
+import urllib.request
+from dataclasses import dataclass
+
+BASE = "https://syzkaller.appspot.com"
+UA = {"User-Agent": "kernel_radar/0.1 (+local)"}
+
+
+@dataclass(frozen=True)
+class Candidate:
+    title: str
+    bug_url: str
+    status: str | None
+    subsystems: list[str]
+    kernel_config_url: str | None
+    repro_c_url: str | None
+    repro_syz_url: str | None
+    crash_report_url: str | None
+
+
+def http_get_text(url: str) -> str:
+    if url.startswith("/"):
+        url = BASE + url
+    req = urllib.request.Request(url, headers=UA)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def html_unescape_amp(s: str) -> str:
+    # syzkaller HTML uses &amp; in hrefs; we only need to unescape that.
+    return s.replace("&amp;", "&")
+
+
+def scrape_bug_page(bug_url: str) -> dict[str, object]:
+    html = http_get_text(bug_url)
+
+    # Status line looks like:
+    #   Status: <a ...>upstream: reported C repro on YYYY/MM/DD HH:MM</a><br>
+    status = None
+    m = re.search(r"Status:\s*<a[^>]*>([^<]+)</a>", html, re.I)
+    if m:
+        status = m.group(1).strip()
+
+    # Subsystems block looks like:
+    #   Subsystems: <span class="bug-label"><a href="/upstream/s/net">net</a></span>
+    subsystems: list[str] = []
+    m = re.search(r"Subsystems:\s*(.*?)<br", html, re.I | re.S)
+    if m:
+        block = m.group(1)
+        subsystems = [
+            s.strip()
+            for s in re.findall(r"/upstream/s/[^\"]+\">([^<]+)</a>", block)
+            if s.strip()
+        ]
+
+    # Reproducer/config/crash are linked via /text?tag=...&x=...
+    text_links = [
+        html_unescape_amp(x) for x in re.findall(r"(/text\?tag=[^\"\s<>]+)", html)
+    ]
+
+    def pick(tag: str) -> str | None:
+        for lnk in text_links:
+            if f"tag={tag}" in lnk:
+                return BASE + lnk
+        return None
+
+    return {
+        "status": status,
+        "subsystems": subsystems,
+        "kernel_config_url": pick("KernelConfig"),
+        "repro_c_url": pick("ReproC"),
+        "repro_syz_url": pick("ReproSyz"),
+        "crash_report_url": pick("CrashReport"),
+    }
+
+
+def looks_hardware_specific(title: str) -> bool:
+    # This is a heuristic. Tune it as needed.
+    return bool(
+        re.search(
+            r"usb|bluetooth|wifi|iwlwifi|ath|drm|amdgpu|nouveau|sound|snd_|nvme|scsi|mmc|rtc|i2c|spi|hid",
+            title,
+            re.I,
+        )
+    )
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--count", type=int, default=3)
+    ap.add_argument("--scan-limit", type=int, default=400)
+    ap.add_argument("--sleep", type=float, default=0.2, help="sleep between bug page fetches")
+    args = ap.parse_args(argv)
+
+    upstream_json = http_get_text(BASE + "/upstream?json=1")
+    data = json.loads(upstream_json)
+    bugs = data.get("Bugs")
+    if not isinstance(bugs, list):
+        print("Unexpected upstream JSON schema", file=sys.stderr)
+        return 2
+
+    found: list[Candidate] = []
+
+    for idx, bug in enumerate(bugs[: args.scan_limit]):
+        title = str(bug.get("title", "")).strip()
+        link = str(bug.get("link", "")).strip()
+        if not title or not link:
+            continue
+
+        if looks_hardware_specific(title):
+            continue
+
+        # We only consider issues that have reproducers embedded on the bug page.
+        try:
+            scraped = scrape_bug_page(link)
+        except Exception:
+            continue
+
+        repro_c_url = scraped.get("repro_c_url")
+        repro_syz_url = scraped.get("repro_syz_url")
+        if not repro_c_url and not repro_syz_url:
+            continue
+
+        found.append(
+            Candidate(
+                title=title,
+                bug_url=BASE + link if link.startswith("/") else link,
+                status=scraped.get("status") if isinstance(scraped.get("status"), str) else None,
+                subsystems=list(scraped.get("subsystems") or []),
+                kernel_config_url=scraped.get("kernel_config_url") if isinstance(scraped.get("kernel_config_url"), str) else None,
+                repro_c_url=repro_c_url if isinstance(repro_c_url, str) else None,
+                repro_syz_url=repro_syz_url if isinstance(repro_syz_url, str) else None,
+                crash_report_url=scraped.get("crash_report_url") if isinstance(scraped.get("crash_report_url"), str) else None,
+            )
+        )
+
+        if len(found) >= args.count:
+            break
+
+        time.sleep(args.sleep)
+
+    for c in found:
+        print(f"\n- {c.title}")
+        print(f"  bug: {c.bug_url}")
+        if c.status:
+            print(f"  status: {c.status}")
+        if c.subsystems:
+            print(f"  subsystems: {', '.join(c.subsystems)}")
+        if c.kernel_config_url:
+            print(f"  kernel config: {c.kernel_config_url}")
+        if c.repro_c_url:
+            print(f"  C repro: {c.repro_c_url}")
+        if c.repro_syz_url:
+            print(f"  syz repro: {c.repro_syz_url}")
+        if c.crash_report_url:
+            print(f"  crash report: {c.crash_report_url}")
+
+    if not found:
+        print("No candidates found; try increasing --scan-limit or relaxing filters.")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
