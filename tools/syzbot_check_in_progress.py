@@ -41,6 +41,22 @@ def http_get_text(url: str) -> str:
         return r.read().decode("utf-8", "replace")
 
 
+def lore_thread_subject(thread_url: str) -> str | None:
+    """Best-effort extract of a lore /T/ thread subject.
+
+    lore thread pages usually include: <u id=u>SUBJECT</u>
+    """
+
+    try:
+        html = http_get_text(thread_url)
+    except Exception:
+        return None
+    m = re.search(r"<u\s+id=u>(.*?)</u>", html, re.I | re.S)
+    if not m:
+        return None
+    return unescape(m.group(1)).strip()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("extid", nargs="?", help="syzbot extid (e.g. 3e68572c...)")
@@ -87,9 +103,11 @@ def main() -> int:
 
     patch_like = []
     for h in lore_links:
-        # Heuristic: /T/ thread pages with subjects including [PATCH]
-        if re.search(r"/T/\s*$", h):
-            patch_like.append(h)
+        if not re.search(r"/T/\s*$", h):
+            continue
+        subj = lore_thread_subject(h)
+        if subj and "[PATCH" in subj.upper():
+            patch_like.append((h, subj))
 
     if lore_links:
         print("\nLore links:")
@@ -99,12 +117,14 @@ def main() -> int:
     # Quick hint: if syzkaller already shows patch-like links, this is usually "in progress".
     if patch_like:
         print("\nPatch-like thread links (likely someone is already working on it):")
-        for h in patch_like[:30]:
-            print(" ", h)
+        for h, subj in patch_like[:30]:
+            print(" ", subj)
+            print("   ", h)
 
     # Detect explicit "fixed" signals on page (not always present).
     fix_signals = []
-    for kw in ["upstream: fixed", "fixed:", "Fix commit", "Fixing commit", "Patched", "Resolved", "dup"]:
+    # Avoid overly-broad keywords like "Patched" which can appear in label docs.
+    for kw in ["upstream: fixed", "fixed:", "Fix commit", "Fixing commit", "Resolved", "dup"]:
         if kw.lower() in html.lower():
             fix_signals.append(kw)
 
