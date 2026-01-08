@@ -3,5 +3,6 @@ config.yaml
 .venv/
 reports/
 outbox/
+repro/
 __pycache__/
 *.pyc
