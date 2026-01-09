@@ -261,7 +261,10 @@ def main(argv: list[str]) -> int:
     decompress_xz(disk_xz_path, out_dir / "disk.raw", force=args.force)
 
     if (out_dir / "vmlinux.xz").exists():
-        decompress_xz(out_dir / "vmlinux.xz", out_dir / "vmlinux", force=args.force)
+        try:
+            decompress_xz(out_dir / "vmlinux.xz", out_dir / "vmlinux", force=args.force)
+        except (EOFError, lzma.LZMAError, OSError) as e:
+            print(f"Warning: failed to decompress vmlinux.xz ({e}); continuing without vmlinux.", file=sys.stderr)
 
     # Fetch text attachments.
     if links.kernel_config:
