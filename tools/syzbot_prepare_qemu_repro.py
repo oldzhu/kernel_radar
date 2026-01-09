@@ -180,7 +180,7 @@ fi
 exec "$QEMU_BIN" \
   -m "$MEM" -smp "$SMP" \
   -kernel "$DIR/bzImage" \
-  -append "console=ttyS0 root=/dev/vda earlyprintk=serial net.ifnames=0" \
+    -append "console=ttyS0 root=/dev/vda1 rootwait rw earlyprintk=serial net.ifnames=0" \
   -drive "file=$DIR/disk.raw,format=raw,if=virtio" \
   -net nic,model=e1000 -net "user,hostfwd=tcp::${HOSTFWD_PORT}-:22" \
   -nographic \

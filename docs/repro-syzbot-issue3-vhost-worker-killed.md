@@ -62,10 +62,25 @@ Notes:
 - You can change VM resources:
   - `MEM=4096 SMP=4 ./run_qemu.sh`
 
+### If you hit “Unable to mount root fs”
+
+syzbot disk images are typically partitioned. If you see a panic like:
+`VFS: Unable to mount root fs`, it usually means the kernel cmdline root device
+is wrong.
+
+This repo’s generator sets:
+- `root=/dev/vda1 rootwait rw`
+
+If you’ve edited an older `run_qemu.sh`, ensure it uses `/dev/vda1` (not `/dev/vda`).
+
 ## 3) Run the syzkaller repro inside the VM
 
-syzbot disk images usually include syzkaller runner binaries (commonly named
-`syz-execprog` and `syz-executor`), but locations can vary.
+Important: `repro.syz` is a **syz program** (not a shell script). To run it you
+need either:
+- a C reproducer (`ReproC`) that you can compile/run directly, or
+- syzkaller runner binaries: `syz-execprog` + `syz-executor`.
+
+Some syzbot images include `syz-execprog`/`syz-executor`, but some do not.
 
 Typical workflow after you get a root shell:
 
@@ -78,6 +93,24 @@ Typical workflow after you get a root shell:
 
 If the binaries are under `/`, try:
 - `/syz-execprog -executor=/syz-executor -procs=1 -repeat=0 repro.syz`
+
+### If the VM does not contain `syz-execprog` / `syz-executor`
+
+You will need to install/build syzkaller on the host, then copy/share the two
+binaries into the VM. Easiest approaches:
+
+- **Host→guest file transfer** (e.g. QEMU 9p shared folder, or scp once SSH works)
+- **Build inside the VM** (slower; needs Go toolchain)
+
+Once you have the two binaries inside the VM, re-run the command above.
+
+### What “reproduced” looks like
+
+For this issue, reproduction usually manifests as a hang/hung task involving vhost,
+e.g. messages like:
+- `INFO: task ... blocked for more than ... seconds`
+- `hung_task: blocked tasks`
+- call traces mentioning `vhost*` (including the vhost worker path)
 
 ## 4) What to capture when it reproduces
 
