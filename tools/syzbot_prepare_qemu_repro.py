@@ -214,6 +214,11 @@ def main(argv: list[str]) -> int:
         help="output directory (default: repro/<extid>)",
     )
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
+    ap.add_argument(
+        "--retry-vmlinux",
+        action="store_true",
+        help="delete and re-download only vmlinux(.xz) for this extid (keeps bzImage/disk)",
+    )
     args = ap.parse_args(argv)
 
     out_dir = Path(args.out or f"repro/{args.extid}")
@@ -237,6 +242,38 @@ def main(argv: list[str]) -> int:
         ]
     )
     write_text(meta, meta_txt + "\n", force=args.force)
+
+    if args.retry_vmlinux:
+        if not links.vmlinux_xz:
+            print("Bug page did not expose a vmlinux asset link.", file=sys.stderr)
+            print(f"bug: {links.bug_url}", file=sys.stderr)
+            return 2
+
+        # Remove stale/corrupt artifacts before re-downloading.
+        for p in [
+            out_dir / "vmlinux",
+            out_dir / "vmlinux.xz",
+            out_dir / "vmlinux.part",
+        ]:
+            try:
+                if p.exists() or p.is_symlink():
+                    p.unlink()
+            except OSError as e:
+                print(f"Warning: failed to remove {p}: {e}", file=sys.stderr)
+
+        vmlinux_xz_path = out_dir / "vmlinux.xz"
+        print(f"Re-downloading vmlinux: {links.vmlinux_xz}")
+        download_stream(links.vmlinux_xz, vmlinux_xz_path, force=True)
+
+        try:
+            decompress_xz(vmlinux_xz_path, out_dir / "vmlinux", force=True)
+            print(f"Rebuilt: {out_dir / 'vmlinux'}")
+        except (EOFError, lzma.LZMAError, OSError) as e:
+            print(f"Warning: vmlinux.xz still failed to decompress ({e}).", file=sys.stderr)
+            print("The rest of the repro bundle is usable without vmlinux.", file=sys.stderr)
+            return 1
+
+        return 0
 
     if not links.disk_xz or not links.bzimage_xz:
         print("Bug page did not expose required assets (disk and bzImage).", file=sys.stderr)
