@@ -129,6 +129,48 @@ binaries into the VM. Easiest approaches:
 
 Once you have the two binaries inside the VM, re-run the command above.
 
+## 3.1) Recommended “scp-free” workflow (use the shared folder)
+
+This is the quickest way to run `repro.syz` without depending on guest SSH.
+
+### On the host
+
+1) Ensure you have the built runner binaries on the host:
+- `~/mylinux/syzkaller/bin/linux_amd64/syz-execprog`
+- `~/mylinux/syzkaller/bin/linux_amd64/syz-executor`
+
+2) Boot the VM with a 9p shared folder that points at `~/mylinux`:
+
+- `cd repro/a9528028ab4ca83e8bac`
+- `SHARE_DIR=/home/oldzhu/mylinux SHARE_MOUNT=/mnt/host ./run_qemu.sh`
+
+Tip: add `DAEMONIZE=1` if you want QEMU detached:
+- `SHARE_DIR=/home/oldzhu/mylinux SHARE_MOUNT=/mnt/host DAEMONIZE=1 ./run_qemu.sh`
+
+### In the guest
+
+1) Mount the shared folder:
+
+- `mkdir -p /mnt/host`
+- `mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host`
+
+2) Copy the binaries and reproducer into a writable guest directory:
+
+- `mkdir -p /root/repro`
+- `cp /mnt/host/syzkaller/bin/linux_amd64/syz-execprog /root/repro/`
+- `cp /mnt/host/syzkaller/bin/linux_amd64/syz-executor /root/repro/`
+- `cp /mnt/host/kernel_radar/repro/a9528028ab4ca83e8bac/repro.syz /root/repro/`
+- `chmod +x /root/repro/syz-execprog /root/repro/syz-executor`
+
+3) Run the reproducer:
+
+- `cd /root/repro`
+- `dmesg -wT &`
+- `./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz`
+
+If it hangs as expected, capture a task dump too:
+- `echo t > /proc/sysrq-trigger`
+
 ### What “reproduced” looks like
 
 For this issue, reproduction usually manifests as a hang/hung task involving vhost,
