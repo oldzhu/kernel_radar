@@ -91,3 +91,238 @@ Note:
 
 Reference repro expectations:
 - `docs/repro-syzbot-issue3-vhost-worker-killed.md`
+
+## Additional experiments / debugging notes (not previously captured)
+
+This section records extra commands and failure modes we hit while actively trying to
+run the repro so we can reproduce/compare later.
+
+### A) Confirmed syzbot “expected symptom” from saved artifacts
+
+The bundle already contains the target hung-task report from syzbot:
+- `repro/a9528028ab4ca83e8bac/crash.report`
+  - `INFO: task vhost-... blocked for more than 143 seconds`
+  - call trace includes `vhost_worker_killed()` in `drivers/vhost/vhost.c:476`.
+
+### B) QEMU/SSH “is it alive?” checks used repeatedly
+
+Host-side checks:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+ls -l qemu.pid
+ps -p "$(cat qemu.pid)" -o pid,cmd
+
+# confirm the hostfwd is active
+ss -ltnp | grep ':10022'
+```
+
+Guest reachability / quick inspection:
+
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'uname -a; echo ---cmdline---; cat /proc/cmdline'
+```
+
+Note: the guest image uses BusyBox; some common flags are missing, e.g.:
+- `ps -p ...` is not supported (BusyBox `ps` doesn’t accept `-p`).
+- `who -b` is not supported (BusyBox `who` supports only `-aH`).
+
+### C) Staging `syz-execprog`/`syz-executor` + `repro.syz` into the guest
+
+We used **scp** successfully as a reliable baseline:
+
+```bash
+SYZ=/home/oldzhu/mylinux/syzkaller/bin/linux_amd64
+BUNDLE=/home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac
+
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 'mkdir -p /root/repro'
+scp -P 10022 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SYZ/syz-execprog" "$SYZ/syz-executor" "$BUNDLE/repro.syz" \
+  root@127.0.0.1:/root/repro/
+```
+
+To verify the executor is the expected build (revision-stamped), we checked strings:
+
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'strings /root/repro/syz-executor | grep -i -E "rev|revision|bc54aa9f" | head -n 20'
+```
+
+Expected output contains the syzkaller git revision (example we saw):
+- `bc54aa9fe40d6d1ffa6f80a1e04a18689ddbc54c`
+
+### D) Running the repro in the guest (backgrounded)
+
+We ran `syz-execprog` in the background so we could keep SSH sessions short:
+
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'set -e; cd /root/repro; rm -f execprog.out; \
+   nohup ./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz \
+     >execprog.out 2>&1 & echo execprog_pid=$!'
+
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'tail -n 10 /root/repro/execprog.out'
+```
+
+We used the “executed programs: N” line to confirm forward progress.
+
+### E) Failure mode 1: early KASAN panic when booted with 9p sharing
+
+When we booted QEMU with 9p enabled via `run_qemu.sh` (setting `SHARE_DIR=...`),
+we observed an **early KASAN Oops + panic** in the guest shortly after userspace:
+
+- `Oops: int3: 0000 [#1] SMP KASAN NOPTI`
+- `RIP: kmem_cache_alloc_noprof+0x9c/0x710`
+- call trace includes `vm_area_alloc -> mmap_region -> do_mmap -> __x64_sys_mmap`
+- `PID: ... Comm: dhcpcd-run-hook`
+- `Kernel panic - not syncing: Fatal exception in interrupt`
+
+This shows up in the guest serial output:
+- `repro/a9528028ab4ca83e8bac/qemu-serial.log`
+
+We captured the panic region for reference using:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+grep -n 'Kernel panic' qemu-serial.log
+sed -n '2180,2310p' qemu-serial.log
+```
+
+Because this panic happens during/soon after boot, SSH often resets or never becomes usable.
+
+### F) Failure mode 2: SSH becomes unresponsive while serial output continues
+
+In runs **without 9p**, the guest booted and SSH worked initially. After running `syz-execprog`
+for a while, SSH started failing with:
+
+- `Connection timed out during banner exchange`
+
+At the same time:
+- QEMU remained alive (`ps` on host shows the qemu pid still running)
+- host port forward remained listening (`ss -ltnp | grep :10022`)
+- `qemu-serial.log` continued printing kernel messages (so the guest was not fully dead)
+
+We attempted to detect the vhost hung-task signature with:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+grep -n -E 'INFO: task vhost|vhost_worker_killed|blocked for more than' qemu-serial.log
+
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'dmesg | grep -E "INFO: task vhost|vhost_worker_killed|blocked for more than" | tail -n 20 || true'
+```
+
+At least in these specific runs, the hung-task lines did **not** show up in serial before SSH
+became unusable.
+
+### G) Guest timekeeping oddity observed
+
+We noticed `/proc/uptime` could be very large while dmesg timestamps were small/normal.
+Example commands used:
+
+```bash
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'cat /proc/uptime; dmesg | tail -n 1'
+```
+
+This may be related to the clocksource messages during boot (tsc marked unstable), but
+we didn’t dig further yet.
+
+### H) Restarting QEMU cleanly between attempts
+
+We restarted QEMU frequently to get a clean run and clean serial logs:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+PID=$(cat qemu.pid)
+kill "$PID" || true
+sleep 1
+kill -9 "$PID" || true
+rm -f qemu.pid qemu-serial.log
+
+# start detached
+DAEMONIZE=1 ./run_qemu.sh
+```
+
+We also tried “boot with 9p share” by setting `SHARE_DIR=...` (see section E).
+
+### I) 2026-01-10 late-night run: daemonized QEMU, SSH dies mid-run, serial-log-driven monitoring
+
+We kicked off another run focused on **capturing the hung-task live**, but ended up re-hitting the
+“SSH becomes unusable while serial output continues” behavior.
+
+High-level outcome:
+- QEMU stayed alive and `qemu-serial.log` kept growing.
+- SSH was reachable initially, we started `syz-execprog`, then SSH began failing with banner timeouts.
+- While SSH was down, we relied on the serial log + a host-side watcher.
+- In this specific run, we did **not** observe `INFO: task vhost-... blocked` / `vhost_worker_killed` in
+  the serial log (at least up through the captured range).
+
+Host-side commands used:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+# (re)start in daemon mode so the shell stays usable
+rm -f qemu.pid qemu-serial.log
+DAEMONIZE=1 ./run_qemu.sh
+
+# wait for guest SSH to come up (simple polling loop)
+for i in $(seq 1 120); do
+  if timeout 2s ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=2 -p 10022 root@127.0.0.1 true; then
+    echo "ssh_up_after_seconds=$i"; break
+  fi
+  sleep 1
+done
+
+# stage + start the repro quickly (short SSH windows)
+SYZ=/home/oldzhu/mylinux/syzkaller/bin/linux_amd64
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 'mkdir -p /root/repro'
+scp -P 10022 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SYZ/syz-execprog" "$SYZ/syz-executor" repro.syz \
+  root@127.0.0.1:/root/repro/
+
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'cd /root/repro; nohup ./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz \
+    >execprog.out 2>&1 & echo execprog_pid=$!'
+```
+
+Notes captured from this run:
+- We recorded a host-side staging transcript including `execprog_pid=6168` in:
+  - `repro/a9528028ab4ca83e8bac/.tmp_stage_run.txt`
+- SSH eventually started failing with:
+  - `Connection timed out during banner exchange`
+
+Serial-log-driven monitoring used:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+# confirm the serial log is still growing (guest still “alive”)
+wc -l qemu-serial.log
+sleep 45
+wc -l qemu-serial.log
+
+# search for the target signature
+egrep -n 'INFO: task|blocked for more than|hung task|vhost_worker_killed|vhost-' qemu-serial.log | tail -n 50
+```
+
+We also set up a lightweight watcher to alert on the hung-task or panic patterns:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+rm -f watch_patterns.log
+(stdbuf -oL tail -n 0 -F qemu-serial.log | \
+  stdbuf -oL egrep --line-buffered 'INFO: task|blocked for more than|hung task|vhost_worker_killed|BUG:|KASAN:|panic|Oops' | \
+  tee -a watch_patterns.log)
+```
+
+At the time we stopped for the day:
+- `watch_patterns.log` was still empty.
+- `grep -ni vhost qemu-serial.log` returned no matches.
+
+````
