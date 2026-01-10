@@ -171,10 +171,45 @@ MEM=${MEM:-2048}
 SMP=${SMP:-2}
 HOSTFWD_PORT=${HOSTFWD_PORT:-10022}
 PERSIST=${PERSIST:-0}
+DAEMONIZE=${DAEMONIZE:-0}
+SERIAL_LOG=${SERIAL_LOG:-"$DIR/qemu-serial.log"}
+PIDFILE=${PIDFILE:-"$DIR/qemu.pid"}
+
+# Optional host->guest file sharing (9p over virtio).
+# Usage:
+#   SHARE_DIR=$PWD SHARE_MOUNT=/mnt/host ./run_qemu.sh
+# Then inside the guest:
+#   mkdir -p /mnt/host
+#   mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host
+SHARE_DIR=${SHARE_DIR:-""}
+SHARE_TAG=${SHARE_TAG:-hostshare}
+SHARE_MOUNT=${SHARE_MOUNT:-/mnt/host}
 
 snapshot_args=()
 if [[ "$PERSIST" != "1" ]]; then
   snapshot_args+=( -snapshot )
+fi
+
+daemon_args=()
+if [[ "$DAEMONIZE" == "1" ]]; then
+    # Detach from the terminal so you can run ssh/scp from the same shell.
+    # Serial output goes to $SERIAL_LOG.
+    daemon_args+=( -daemonize -pidfile "$PIDFILE" -serial "file:${SERIAL_LOG}" )
+fi
+
+virtfs_args=()
+if [[ -n "$SHARE_DIR" ]]; then
+    if [[ ! -d "$SHARE_DIR" ]]; then
+        echo "SHARE_DIR does not exist or is not a directory: $SHARE_DIR" >&2
+        exit 2
+    fi
+    # 9p sharing via virtio-9p-pci.
+    # Mount inside guest:
+    #   mkdir -p "$SHARE_MOUNT" && mount -t 9p -o trans=virtio,version=9p2000.L "$SHARE_TAG" "$SHARE_MOUNT"
+    virtfs_args+=(
+        -fsdev "local,id=fsdev0,path=${SHARE_DIR},security_model=none"
+        -device "virtio-9p-pci,fsdev=fsdev0,mount_tag=${SHARE_TAG}"
+    )
 fi
 
 exec "$QEMU_BIN" \
@@ -184,6 +219,8 @@ exec "$QEMU_BIN" \
   -drive "file=$DIR/disk.raw,format=raw,if=virtio" \
   -net nic,model=e1000 -net "user,hostfwd=tcp::${HOSTFWD_PORT}-:22" \
   -nographic \
+    "${virtfs_args[@]}" \
+    "${daemon_args[@]}" \
   "${snapshot_args[@]}"
 """
 

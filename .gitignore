@@ -6,3 +6,4 @@ outbox/
 repro/
 __pycache__/
 *.pyc
+.tmp_*

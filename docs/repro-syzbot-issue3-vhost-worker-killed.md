@@ -62,6 +62,31 @@ Notes:
 - You can change VM resources:
   - `MEM=4096 SMP=4 ./run_qemu.sh`
 
+### Optional: run QEMU in the background (keep your terminal)
+
+By default the VM runs in the foreground and takes over your terminal.
+
+If you want the VM detached (so you can run `ssh`/`scp` from the same shell), use:
+- `DAEMONIZE=1 ./run_qemu.sh`
+
+It will write:
+- `qemu-serial.log` (serial console output)
+- `qemu.pid` (QEMU PID)
+
+### Optional: host↔guest shared folder (9p)
+
+If you want a simple file transfer path without relying on SSH/scp, you can pass a host directory
+to the VM via 9p:
+
+- `SHARE_DIR=$PWD SHARE_MOUNT=/mnt/host ./run_qemu.sh`
+
+Then inside the guest:
+
+- `mkdir -p /mnt/host`
+- `mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host`
+
+After that, files you put in `$PWD` on the host will appear under `/mnt/host` in the VM.
+
 ### If you hit “Unable to mount root fs”
 
 syzbot disk images are typically partitioned. If you see a panic like:
