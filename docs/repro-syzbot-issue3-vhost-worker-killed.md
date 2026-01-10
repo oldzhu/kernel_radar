@@ -76,6 +76,8 @@ By default the VM runs in the foreground and takes over your terminal.
 If you want the VM detached (so you can run `ssh`/`scp` from the same shell), use:
 - `DAEMONIZE=1 ./run_qemu.sh`
 
+Note: daemonized mode is fully headless (no `-nographic`); console output is written to `qemu-serial.log`.
+
 It will write:
 - `qemu-serial.log` (serial console output)
 - `qemu.pid` (QEMU PID)

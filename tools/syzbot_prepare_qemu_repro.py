@@ -191,10 +191,16 @@ if [[ "$PERSIST" != "1" ]]; then
 fi
 
 daemon_args=()
+nographic_args=()
 if [[ "$DAEMONIZE" == "1" ]]; then
     # Detach from the terminal so you can run ssh/scp from the same shell.
     # Serial output goes to $SERIAL_LOG.
     daemon_args+=( -daemonize -pidfile "$PIDFILE" -serial "file:${SERIAL_LOG}" )
+    # QEMU does not allow -nographic together with -daemonize.
+    # Use a headless display backend instead.
+    nographic_args+=( -display none )
+else
+    nographic_args+=( -nographic )
 fi
 
 virtfs_args=()
@@ -218,7 +224,7 @@ exec "$QEMU_BIN" \
     -append "console=ttyS0 root=/dev/vda1 rootwait rw earlyprintk=serial net.ifnames=0" \
   -drive "file=$DIR/disk.raw,format=raw,if=virtio" \
   -net nic,model=e1000 -net "user,hostfwd=tcp::${HOSTFWD_PORT}-:22" \
-  -nographic \
+    "${nographic_args[@]}" \
     "${virtfs_args[@]}" \
     "${daemon_args[@]}" \
   "${snapshot_args[@]}"
