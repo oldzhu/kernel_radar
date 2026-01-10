@@ -252,6 +252,11 @@ def main(argv: list[str]) -> int:
     )
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
     ap.add_argument(
+        "--regen-runner",
+        action="store_true",
+        help="only (re)generate run_qemu.sh; do not download/decompress attachments or assets",
+    )
+    ap.add_argument(
         "--retry-vmlinux",
         action="store_true",
         help="delete and re-download only vmlinux(.xz) for this extid (keeps bzImage/disk)",
@@ -279,6 +284,12 @@ def main(argv: list[str]) -> int:
         ]
     )
     write_text(meta, meta_txt + "\n", force=args.force)
+
+    if args.regen_runner:
+        # Intentionally do not touch downloaded assets or attachments; just update the runner script.
+        write_run_qemu_sh(out_dir, force=True)
+        print(f"Regenerated runner: {out_dir / 'run_qemu.sh'}")
+        return 0
 
     if args.retry_vmlinux:
         if not links.vmlinux_xz:

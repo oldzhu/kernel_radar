@@ -49,7 +49,14 @@ Internally it:
 
 Safety behaviors:
 - It will not overwrite existing files unless you pass `--force`.
+- If you only want to refresh `run_qemu.sh` (for example after we tweak QEMU args in the generator), use `--regen-runner` to avoid any downloads/decompression.
 - It keeps the original `*.xz` files so you can re-decompress without re-downloading.
+
+Runner-only update example:
+
+```bash
+./tools/syzbot_prepare_qemu_repro.py --extid a9528028ab4ca83e8bac --regen-runner
+```
 
 ## 2) Boot QEMU
 
