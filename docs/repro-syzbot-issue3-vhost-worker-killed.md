@@ -107,6 +107,72 @@ This repo’s generator sets:
 
 If you’ve edited an older `run_qemu.sh`, ensure it uses `/dev/vda1` (not `/dev/vda`).
 
+## 2.1) Manual runbook (host-side)
+
+This section is a copy/paste-friendly “manual ops” checklist for running the repro repeatedly.
+
+### A) Clean stop + restart QEMU (daemon mode recommended)
+
+From the bundle directory:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+# stop an existing VM if present
+if [[ -f qemu.pid ]]; then
+  kill "$(cat qemu.pid)" || true
+  sleep 1
+  kill -9 "$(cat qemu.pid)" || true
+fi
+
+rm -f qemu.pid qemu-serial.log
+
+# start detached (keeps your terminal)
+DAEMONIZE=1 ./run_qemu.sh
+```
+
+What you should see:
+- `qemu.pid` appears (PID of qemu)
+- `qemu-serial.log` grows over time
+
+### B) Watch for the target signature in the serial log
+
+Run one of these on the host:
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+# quick grep (useful after-the-fact)
+egrep -n 'INFO: task|blocked for more than|hung task|vhost_worker_killed|vhost-' qemu-serial.log | tail -n 50
+
+# live watcher (best when SSH dies)
+rm -f watch_patterns.log
+(stdbuf -oL tail -n 0 -F qemu-serial.log | \
+  stdbuf -oL egrep --line-buffered 'INFO: task|blocked for more than|hung task|vhost_worker_killed|BUG:|KASAN:|panic|Oops' | \
+  tee -a watch_patterns.log)
+```
+
+### C) Verify the forwarded SSH port is up (don’t let commands hang)
+
+We forward host `127.0.0.1:10022` → guest `:22`.
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+# host-side: make sure the port is listening
+ss -ltnp | grep ':10022' || true
+
+# guest-side probe (hard timeout so it never blocks)
+timeout 8s ssh -o BatchMode=yes \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o ConnectTimeout=5 -p 10022 root@127.0.0.1 true \
+  && echo SSH_OK || echo SSH_FAIL
+```
+
+If `SSH_FAIL` but `qemu-serial.log` is still growing, treat the VM as alive and switch to serial-log-driven monitoring.
+
+## 3) Run the syzkaller repro inside the VM
+
 ## 3) Run the syzkaller repro inside the VM
 
 Important: `repro.syz` is a **syz program** (not a shell script). To run it you
@@ -137,6 +203,46 @@ binaries into the VM. Easiest approaches:
 - **Build inside the VM** (slower; needs Go toolchain)
 
 Once you have the two binaries inside the VM, re-run the command above.
+
+## 3.2) Manual workflow (SSH + scp) — baseline reliable method
+
+We found this to be the most reliable way to get started. SSH may become unstable *after* `syz-execprog`
+runs for a while, so the trick is to keep SSH sessions short and background the workload.
+
+### On the host
+
+```bash
+cd repro/a9528028ab4ca83e8bac
+
+SYZ=/home/oldzhu/mylinux/syzkaller/bin/linux_amd64
+
+# wait for SSH to become reachable (simple polling loop)
+for i in $(seq 1 120); do
+  if timeout 2s ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=2 -p 10022 root@127.0.0.1 true; then
+    echo "ssh_up_after_seconds=$i"; break
+  fi
+  sleep 1
+done
+
+# stage files
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 'mkdir -p /root/repro'
+scp -P 10022 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  "$SYZ/syz-execprog" "$SYZ/syz-executor" repro.syz \
+  root@127.0.0.1:/root/repro/
+
+# start the repro in the background
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 10022 root@127.0.0.1 \
+  'set -e; cd /root/repro; chmod +x syz-execprog syz-executor; rm -f execprog.out; \
+   nohup ./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz \
+     >execprog.out 2>&1 & echo execprog_pid=$!'
+
+# optional: try to fetch a small tail (may fail later if SSH starts timing out)
+timeout 8s ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 \
+  -p 10022 root@127.0.0.1 'tail -n 20 /root/repro/execprog.out' || true
+```
+
+If SSH starts failing with `Connection timed out during banner exchange`, rely on `qemu-serial.log` + the watcher (section 2.1B).
 
 ## 3.1) Recommended “scp-free” workflow (use the shared folder)
 
@@ -196,6 +302,27 @@ ownership. Useful data to post back to the thread includes:
 - full console output up to the hang
 - `sysrq` task dumps (if enabled): `echo t > /proc/sysrq-trigger`
 - `dmesg` output from the VM
+
+## 6) Known failure modes (what we’ve seen so far)
+
+### A) SSH becomes unusable mid-run while serial output continues
+
+Symptom (host-side):
+- `Connection timed out during banner exchange`
+
+What to do:
+- Stop relying on SSH, and instead:
+  - use `qemu-serial.log` + `watch_patterns.log` to detect the hung-task signature
+  - keep checking whether `qemu-serial.log` is still growing (`wc -l qemu-serial.log`, `tail -n 50 qemu-serial.log`)
+
+### B) Early KASAN Oops/panic when 9p sharing is enabled
+
+In some runs with `SHARE_DIR=...` (virtio-9p), we observed an early KASAN Oops/panic during/soon after userspace.
+
+Practical advice:
+- If your goal is reproducing the hung-task, prefer the SSH+scp workflow first.
+- Use 9p only if you specifically want scp-free staging, and be aware it may change timing/behavior.
+
 
 ## 5) Related thread review
 
