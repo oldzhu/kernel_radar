@@ -55,7 +55,7 @@ WATCH_PATTERNS=${WATCH_PATTERNS:-'INFO: task|blocked for more than|hung task|vho
 
 usage() {
   cat <<EOF
-Usage: $0
+Usage: $0 [--stop|--status] [--clean]
 
 Environment overrides:
   EXTID=...            syzbot extid (default: $EXTID)
@@ -68,6 +68,9 @@ Environment overrides:
   USE_9P=0|1           enable 9p share (default: $USE_9P)
   SHARE_DIR=...        host dir to share (required if USE_9P=1)
   WATCH=0|1            start serial-log watcher (default: $WATCH)
+  --stop               stop QEMU + watcher (uses qemu.pid / watcher.pid)
+  --status             show QEMU/watcher status and log sizes
+  --clean              (with --stop) also remove qemu.pid/watcher.pid
 
 What it does:
   1) Ensure bundle exists (or prompt you to run the downloader)
@@ -79,10 +82,33 @@ What it does:
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+ACTION=start
+CLEAN=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --stop)
+      ACTION=stop
+      shift
+      ;;
+    --status)
+      ACTION=status
+      shift
+      ;;
+    --clean)
+      CLEAN=1
+      shift
+      ;;
+    *)
+      echo "Unknown arg: $1" >&2
+      echo "Run with --help for usage." >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [[ ! -d "$REPO_ROOT" || ! -f "$REPO_ROOT/tools/syzbot_prepare_qemu_repro.py" ]]; then
   echo "ERROR: REPO_ROOT does not look like kernel_radar: $REPO_ROOT" >&2
@@ -116,19 +142,92 @@ fi
 
 cd "$BUNDLE_DIR"
 
+stop_vm() {
+  local stopped=0
+
+  if [[ -f watcher.pid ]]; then
+    local wpid
+    wpid=$(cat watcher.pid 2>/dev/null || true)
+    if [[ -n "${wpid:-}" ]] && kill -0 "$wpid" 2>/dev/null; then
+      echo "[host] stopping watcher pid=$wpid"
+      kill "$wpid" 2>/dev/null || true
+      sleep 0.2
+      kill -9 "$wpid" 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+
+  if [[ -f qemu.pid ]]; then
+    local qpid
+    qpid=$(cat qemu.pid 2>/dev/null || true)
+    if [[ -n "${qpid:-}" ]] && kill -0 "$qpid" 2>/dev/null; then
+      echo "[host] stopping qemu pid=$qpid"
+      kill "$qpid" 2>/dev/null || true
+      sleep 1
+      kill -9 "$qpid" 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+
+  if [[ "$CLEAN" == "1" ]]; then
+    rm -f qemu.pid watcher.pid
+  fi
+
+  if [[ "$stopped" == "0" ]]; then
+    echo "[host] nothing to stop (no running qemu/watcher found)"
+  fi
+}
+
+status_vm() {
+  echo "[host] bundle=$BUNDLE_DIR"
+  if [[ -f qemu.pid ]]; then
+    qpid=$(cat qemu.pid 2>/dev/null || true)
+    if [[ -n "${qpid:-}" ]] && kill -0 "$qpid" 2>/dev/null; then
+      echo "[host] qemu: running pid=$qpid"
+    else
+      echo "[host] qemu: not running (qemu.pid present: ${qpid:-empty})"
+    fi
+  else
+    echo "[host] qemu: no qemu.pid"
+  fi
+
+  if [[ -f watcher.pid ]]; then
+    wpid=$(cat watcher.pid 2>/dev/null || true)
+    if [[ -n "${wpid:-}" ]] && kill -0 "$wpid" 2>/dev/null; then
+      echo "[host] watcher: running pid=$wpid"
+    else
+      echo "[host] watcher: not running (watcher.pid present: ${wpid:-empty})"
+    fi
+  else
+    echo "[host] watcher: no watcher.pid"
+  fi
+
+  if [[ -f qemu-serial.log ]]; then
+    echo "[host] qemu-serial.log: $(wc -l < qemu-serial.log) lines, $(ls -lh qemu-serial.log | awk '{print $5}')"
+  else
+    echo "[host] qemu-serial.log: missing"
+  fi
+  if [[ -f watch_patterns.log ]]; then
+    echo "[host] watch_patterns.log: $(wc -l < watch_patterns.log) lines, $(ls -lh watch_patterns.log | awk '{print $5}')"
+  else
+    echo "[host] watch_patterns.log: missing"
+  fi
+}
+
+if [[ "$ACTION" == "stop" ]]; then
+  stop_vm
+  exit 0
+fi
+
+if [[ "$ACTION" == "status" ]]; then
+  status_vm
+  exit 0
+fi
+
 echo "[host] bundle=$BUNDLE_DIR"
 echo "[host] qemu: MEM=$MEM SMP=$SMP HOSTFWD_PORT=$HOSTFWD_PORT PERSIST=$PERSIST DAEMONIZE=$DAEMONIZE"
 
-# Stop VM if already running
-if [[ -f qemu.pid ]]; then
-  old_pid=$(cat qemu.pid || true)
-  if [[ -n "${old_pid:-}" ]]; then
-    echo "[host] stopping existing qemu pid=$old_pid"
-    kill "$old_pid" 2>/dev/null || true
-    sleep 1
-    kill -9 "$old_pid" 2>/dev/null || true
-  fi
-fi
+stop_vm || true
 
 rm -f qemu.pid qemu-serial.log watch_patterns.log watcher.pid
 

@@ -121,6 +121,13 @@ From the repo root:
 tools/run_issue3_manual.sh
 ```
 
+To check/stop later:
+
+```bash
+tools/run_issue3_manual.sh --status
+tools/run_issue3_manual.sh --stop
+```
+
 ### A) Clean stop + restart QEMU (daemon mode recommended)
 
 From the bundle directory:
