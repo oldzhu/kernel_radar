@@ -111,6 +111,16 @@ If you’ve edited an older `run_qemu.sh`, ensure it uses `/dev/vda1` (not `/dev
 
 This section is a copy/paste-friendly “manual ops” checklist for running the repro repeatedly.
 
+Optional helper script (runs these same steps, but keeps everything transparent):
+
+- `tools/run_issue3_manual.sh`
+
+From the repo root:
+
+```bash
+tools/run_issue3_manual.sh
+```
+
 ### A) Clean stop + restart QEMU (daemon mode recommended)
 
 From the bundle directory:
