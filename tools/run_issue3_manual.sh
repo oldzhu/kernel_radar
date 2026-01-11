@@ -47,7 +47,14 @@ SSH_OPTS=(
   -p "$SSH_PORT"
   root@"$SSH_HOST"
 )
-SSH_WAIT_SECS=${SSH_WAIT_SECS:-120}
+SSH_WAIT_SECS=${SSH_WAIT_SECS:-240}
+
+# syz-execprog knobs (guest-side workload)
+EXECPROG_SANDBOX=${EXECPROG_SANDBOX:-none}
+EXECPROG_PROCS=${EXECPROG_PROCS:-6}
+EXECPROG_THREADED=${EXECPROG_THREADED:-1}
+EXECPROG_REPEAT=${EXECPROG_REPEAT:-0}
+EXECPROG_EXTRA_ARGS=${EXECPROG_EXTRA_ARGS:-}
 
 # Monitoring
 WATCH=${WATCH:-1}
@@ -68,6 +75,11 @@ Environment overrides:
   USE_9P=0|1           enable 9p share (default: $USE_9P)
   SHARE_DIR=...        host dir to share (required if USE_9P=1)
   WATCH=0|1            start serial-log watcher (default: $WATCH)
+  EXECPROG_SANDBOX=... syz-execprog -sandbox (default: $EXECPROG_SANDBOX)
+  EXECPROG_PROCS=...   syz-execprog -procs (default: $EXECPROG_PROCS)
+  EXECPROG_THREADED=0|1 syz-execprog -threaded (default: $EXECPROG_THREADED)
+  EXECPROG_REPEAT=...  syz-execprog -repeat (default: $EXECPROG_REPEAT)
+  EXECPROG_EXTRA_ARGS='...' extra args appended to syz-execprog
   --stop               stop QEMU + watcher (uses qemu.pid / watcher.pid)
   --status             show QEMU/watcher status and log sizes
   --clean              (with --stop) also remove qemu.pid/watcher.pid
@@ -109,6 +121,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "$CLEAN" == "1" && "$ACTION" == "start" ]]; then
+  echo "ERROR: --clean must be used with --stop (e.g. --stop --clean)." >&2
+  exit 2
+fi
 
 if [[ ! -d "$REPO_ROOT" || ! -f "$REPO_ROOT/tools/syzbot_prepare_qemu_repro.py" ]]; then
   echo "ERROR: REPO_ROOT does not look like kernel_radar: $REPO_ROOT" >&2
@@ -278,7 +295,7 @@ stage_log="$BUNDLE_DIR/.tmp_stage_run.$(date +%Y%m%d-%H%M%S).txt"
   echo "[host] start execprog";
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT" root@"$SSH_HOST" \
     'set -e; cd /root/repro; chmod +x syz-execprog syz-executor; rm -f execprog.out; \
-     nohup ./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz \
+     nohup ./syz-execprog -executor=./syz-executor -sandbox='"$EXECPROG_SANDBOX"' -procs='"$EXECPROG_PROCS"' -threaded='"$EXECPROG_THREADED"' -repeat='"$EXECPROG_REPEAT"' '"$EXECPROG_EXTRA_ARGS"' repro.syz \
        >execprog.out 2>&1 & echo execprog_pid=$!'
   echo "[host] tail execprog.out (may fail later if ssh degrades)";
   timeout 8s ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 \
