@@ -26,6 +26,15 @@ HOSTFWD_PORT=${HOSTFWD_PORT:-10022}
 PERSIST=${PERSIST:-0}
 DAEMONIZE=${DAEMONIZE:-1}
 
+# Kernel selection (A/B testing)
+USE_LOCALIMAGE=${USE_LOCALIMAGE:-0}
+KERNEL_IMAGE=${KERNEL_IMAGE:-""}
+
+# Optional tracing passthrough (see repro/*/run_qemu.sh)
+FTRACE_DUMP_ON_OOPS=${FTRACE_DUMP_ON_OOPS:-1}
+TRACE_BUF_SIZE_KB=${TRACE_BUF_SIZE_KB:-1024}
+APPEND_EXTRA=${APPEND_EXTRA:-""}
+
 # Syzkaller binaries location (host)
 SYZ_BIN=${SYZ_BIN:-"$HOME/mylinux/syzkaller/bin/linux_amd64"}
 SYZ_EXECPROG=${SYZ_EXECPROG:-"$SYZ_BIN/syz-execprog"}
@@ -77,8 +86,13 @@ Environment overrides:
   SYZ_BIN=...          dir containing syz-execprog/syz-executor
   HOSTFWD_PORT=...     host forwarded SSH port (default: $HOSTFWD_PORT)
   MEM=... SMP=...      QEMU resources
+  USE_LOCALIMAGE=0|1   boot localimage/bzImage instead of bundle bzImage
+  KERNEL_IMAGE=...     explicit kernel path for QEMU (overrides USE_LOCALIMAGE)
   PERSIST=1            persist disk changes (default snapshot mode)
   DAEMONIZE=0|1        run qemu detached (default: $DAEMONIZE)
+  FTRACE_DUMP_ON_OOPS=0|1 dump ftrace buffer on oops/panic (default: $FTRACE_DUMP_ON_OOPS)
+  TRACE_BUF_SIZE_KB=... ftrace ring buffer size (default: $TRACE_BUF_SIZE_KB)
+  APPEND_EXTRA='...'   extra kernel cmdline appended for QEMU
   USE_9P=0|1           enable 9p share (default: $USE_9P)
   SHARE_DIR=...        host dir to share (required if USE_9P=1)
   WATCH=0|1            start serial-log watcher (default: $WATCH)
@@ -312,7 +326,17 @@ rm -f execprog_tail.pid
 rm -f execprog_trim.pid
 
 # Start QEMU
-qemu_env=(MEM="$MEM" SMP="$SMP" HOSTFWD_PORT="$HOSTFWD_PORT" PERSIST="$PERSIST" DAEMONIZE="$DAEMONIZE")
+if [[ -z "$KERNEL_IMAGE" && "$USE_LOCALIMAGE" == "1" ]]; then
+  KERNEL_IMAGE="$BUNDLE_DIR/localimage/bzImage"
+fi
+
+qemu_env=(MEM="$MEM" SMP="$SMP" HOSTFWD_PORT="$HOSTFWD_PORT" PERSIST="$PERSIST" DAEMONIZE="$DAEMONIZE" FTRACE_DUMP_ON_OOPS="$FTRACE_DUMP_ON_OOPS" TRACE_BUF_SIZE_KB="$TRACE_BUF_SIZE_KB")
+if [[ -n "$KERNEL_IMAGE" ]]; then
+  qemu_env+=(KERNEL_IMAGE="$KERNEL_IMAGE")
+fi
+if [[ -n "$APPEND_EXTRA" ]]; then
+  qemu_env+=(APPEND_EXTRA="$APPEND_EXTRA")
+fi
 if [[ "$USE_9P" == "1" ]]; then
   if [[ -z "$SHARE_DIR" ]]; then
     echo "ERROR: USE_9P=1 requires SHARE_DIR=..." >&2
@@ -355,6 +379,19 @@ stage_log="$BUNDLE_DIR/.tmp_stage_run.$(date +%Y%m%d-%H%M%S).txt"
   scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     "$SYZ_EXECPROG" "$SYZ_EXECUTOR" "$BUNDLE_DIR/repro.syz" \
     root@"$SSH_HOST":/root/repro/
+
+  # Keep the VM alive longer: kernel cmdline doesn't support panic_on_oops=0,
+  # and syzbot images often default panic_on_oops/panic_on_warn to 1.
+  # Try both sysctl and direct /proc writes; ignore failures.
+  echo "[host] set sysctls (panic_on_oops=0 panic_on_warn=0)";
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT" root@"$SSH_HOST" \
+    'set +e; \
+     sysctl -w kernel.panic_on_oops=0 2>/dev/null; \
+     sysctl -w kernel.panic_on_warn=0 2>/dev/null; \
+     echo 0 >/proc/sys/kernel/panic_on_oops 2>/dev/null; \
+     echo 0 >/proc/sys/kernel/panic_on_warn 2>/dev/null; \
+     true'
+
   echo "[host] start execprog";
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT" root@"$SSH_HOST" \
     'set -e; cd /root/repro; chmod +x syz-execprog syz-executor; rm -f execprog.out; \

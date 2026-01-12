@@ -9,15 +9,81 @@ useful evidence (stacks, lock holders) before attempting a fix.
 
 ## Status (2026-01-12)
 
-We observed the target signature in the VM serial log:
+Baseline repro (syzbot kernel) succeeded previously:
 - `INFO: task vhost-... blocked for more than ... seconds`
 - stack including `vhost_worker_killed()`
 - escalated to `Kernel panic - not syncing: hung_task: blocked tasks`
+
+Today’s work focused on moving from “can repro once” to a repeatable *instrumented* workflow:
+- Added a local-kernel build pipeline (from `~/mylinux/linux`) that stages artifacts under `repro/<extid>/localimage/`.
+- Enabled lockdep + ftrace dump-on-oops and added targeted vhost lock tracing (in the kernel tree under `~/mylinux/linux`, not in this repo).
+- Reduced unrelated noise/crashes by disabling `CONFIG_NILFS2_FS` and `CONFIG_NETDEVSIM` in the local fragment.
+
+Current blocker seen with the local kernel:
+- VM hits `Oops: int3` in `kmem_cache_alloc_noprof()` and panics (SSH resets).
+- ftrace dumps show our `vhost_lock:` tracepoints firing, so the instrumentation is working.
+- The runner now attempts to disable panic-on-oops/panic-on-warn in the guest via sysctl before starting `syz-execprog`.
 
 For that run, the bundle directory contains timestamped archives like:
 - `qemu-serial.panic.<timestamp>.log`
 - `watch_patterns.panic.<timestamp>.log`
 - `execprog_stream.tail.<timestamp>.log` (small tail; safe to share)
+
+## 0.1) What changed today (summary)
+
+New/updated helper scripts in this repo:
+- `tools/build_issue3_local_kernel.sh`: builds a local kernel from `~/mylinux/linux` using `kernel.config` + a fragment, stages to `repro/<extid>/localimage/`.
+- `tools/run_issue3_manual.sh`: supports A/B kernel selection and extra tracing knobs; also sets guest sysctls to reduce “oops → immediate panic”.
+
+Local (non-repo) kernel tree changes:
+- We added targeted `trace_printk()` in vhost paths under `~/mylinux/linux/drivers/vhost/vhost.c`.
+- These changes are not committed here (this repo intentionally only carries automation + docs).
+
+## 2.2) Local kernel (A/B boot) + tracing knobs
+
+We keep the original syzbot bundle intact and place local artifacts under:
+- `repro/a9528028ab4ca83e8bac/localimage/`
+
+### Build the local kernel
+
+From the repo root:
+
+```bash
+tools/build_issue3_local_kernel.sh
+```
+
+This uses:
+- base: `repro/a9528028ab4ca83e8bac/kernel.config`
+- fragment: `repro/a9528028ab4ca83e8bac/localimage/lockdep-trace-nonilfs.config`
+- kernel tree: `~/mylinux/linux`
+
+Artifacts staged into `repro/a9528028ab4ca83e8bac/localimage/`:
+- `bzImage` (for QEMU)
+- `vmlinux` (for symbolization)
+- `System.map`, `config` (debugging reference)
+
+### Boot the local kernel + run the workload
+
+Example (more aggressive workload + larger ftrace buffer):
+
+```bash
+USE_LOCALIMAGE=1 \
+TRACE_BUF_SIZE_KB=8192 \
+FTRACE_DUMP_ON_OOPS=1 \
+APPEND_EXTRA='panic_on_warn=0 oops=continue' \
+EXECPROG_PROCS=8 \
+EXECPROG_REPEAT=1 \
+CAPTURE_EXECPROG=1 \
+tools/run_issue3_manual.sh
+```
+
+Notes:
+- `panic_on_oops=0` is *not* a supported kernel cmdline parameter; the kernel will print it as unknown.
+- To avoid “oops → immediate panic”, the runner now tries:
+  - `sysctl -w kernel.panic_on_oops=0` and `kernel.panic_on_warn=0`
+  - and (fallback) writing `/proc/sys/kernel/panic_on_oops` / `/proc/sys/kernel/panic_on_warn`
+
+## 6) Known failure modes (what we’ve seen so far)
 
 ## 0) Prereqs
 
@@ -361,6 +427,17 @@ In some runs with `SHARE_DIR=...` (virtio-9p), we observed an early KASAN Oops/p
 Practical advice:
 - If your goal is reproducing the hung-task, prefer the SSH+scp workflow first.
 - Use 9p only if you specifically want scp-free staging, and be aware it may change timing/behavior.
+
+### C) Local kernel: `Oops: int3` then panic (SSH reset)
+
+Symptom:
+- `Oops: int3` with RIP in `kmem_cache_alloc_noprof()`
+- followed by `Kernel panic - not syncing: Fatal exception in interrupt`
+
+Notes:
+- This is a separate crash signature from the original vhost hung-task; it can block reaching the target.
+- ftrace dumps still include our `vhost_lock:` traces, so vhost code paths are exercised.
+- Mitigation attempt: disable panic-on-oops/panic-on-warn via sysctl (now automated in `tools/run_issue3_manual.sh`).
 
 
 ## 5) Related thread review
