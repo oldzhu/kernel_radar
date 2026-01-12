@@ -7,6 +7,18 @@ This doc records an end-to-end “use syzbot artifacts first” repro setup for:
 The point is to quickly get a reproducer running under QEMU so we can gather
 useful evidence (stacks, lock holders) before attempting a fix.
 
+## Status (2026-01-12)
+
+We observed the target signature in the VM serial log:
+- `INFO: task vhost-... blocked for more than ... seconds`
+- stack including `vhost_worker_killed()`
+- escalated to `Kernel panic - not syncing: hung_task: blocked tasks`
+
+For that run, the bundle directory contains timestamped archives like:
+- `qemu-serial.panic.<timestamp>.log`
+- `watch_patterns.panic.<timestamp>.log`
+- `execprog_stream.tail.<timestamp>.log` (small tail; safe to share)
+
 ## 0) Prereqs
 
 - QEMU (host): `qemu-system-x86_64`
@@ -127,6 +139,16 @@ To check/stop later:
 tools/run_issue3_manual.sh --status
 tools/run_issue3_manual.sh --stop
 ```
+
+Optional: capture the guest `execprog.out` to the host (bounded size by default):
+
+```bash
+CAPTURE_EXECPROG=1 tools/run_issue3_manual.sh
+```
+
+Knobs:
+- `EXECPROG_STREAM_MAX_BYTES` (default: 5MiB; set `0` to disable trimming)
+- `EXECPROG_STREAM_TRIM_SECS` (default: 5)
 
 ### A) Clean stop + restart QEMU (daemon mode recommended)
 

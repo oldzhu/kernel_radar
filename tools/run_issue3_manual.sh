@@ -60,6 +60,13 @@ EXECPROG_EXTRA_ARGS=${EXECPROG_EXTRA_ARGS:-}
 WATCH=${WATCH:-1}
 WATCH_PATTERNS=${WATCH_PATTERNS:-'INFO: task|blocked for more than|hung task|vhost_worker_killed|BUG:|KASAN:|panic|Oops'}
 
+# Optional: stream guest /root/repro/execprog.out to a host file via a long-lived ssh tail.
+# Useful when execprog is run with -output/-debug so we can preserve the last printed program.
+CAPTURE_EXECPROG=${CAPTURE_EXECPROG:-0}
+EXECPROG_STREAM_LOG=${EXECPROG_STREAM_LOG:-"$BUNDLE_DIR/execprog_stream.log"}
+EXECPROG_STREAM_MAX_BYTES=${EXECPROG_STREAM_MAX_BYTES:-5242880}
+EXECPROG_STREAM_TRIM_SECS=${EXECPROG_STREAM_TRIM_SECS:-5}
+
 usage() {
   cat <<EOF
 Usage: $0 [--stop|--status] [--clean]
@@ -80,6 +87,10 @@ Environment overrides:
   EXECPROG_THREADED=0|1 syz-execprog -threaded (default: $EXECPROG_THREADED)
   EXECPROG_REPEAT=...  syz-execprog -repeat (default: $EXECPROG_REPEAT)
   EXECPROG_EXTRA_ARGS='...' extra args appended to syz-execprog
+  CAPTURE_EXECPROG=0|1 stream /root/repro/execprog.out to host (default: $CAPTURE_EXECPROG)
+  EXECPROG_STREAM_LOG=... host path for streamed execprog.out (default: $EXECPROG_STREAM_LOG)
+  EXECPROG_STREAM_MAX_BYTES=... max bytes to keep in execprog stream log (default: $EXECPROG_STREAM_MAX_BYTES, 0 disables trimming)
+  EXECPROG_STREAM_TRIM_SECS=... how often to trim the stream log (default: $EXECPROG_STREAM_TRIM_SECS)
   --stop               stop QEMU + watcher (uses qemu.pid / watcher.pid)
   --status             show QEMU/watcher status and log sizes
   --clean              (with --stop) also remove qemu.pid/watcher.pid
@@ -162,6 +173,30 @@ cd "$BUNDLE_DIR"
 stop_vm() {
   local stopped=0
 
+  if [[ -f execprog_tail.pid ]]; then
+    local tpid
+    tpid=$(cat execprog_tail.pid 2>/dev/null || true)
+    if [[ -n "${tpid:-}" ]] && kill -0 "$tpid" 2>/dev/null; then
+      echo "[host] stopping execprog tail pid=$tpid"
+      kill "$tpid" 2>/dev/null || true
+      sleep 0.2
+      kill -9 "$tpid" 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+
+  if [[ -f execprog_trim.pid ]]; then
+    local cpid
+    cpid=$(cat execprog_trim.pid 2>/dev/null || true)
+    if [[ -n "${cpid:-}" ]] && kill -0 "$cpid" 2>/dev/null; then
+      echo "[host] stopping execprog trim pid=$cpid"
+      kill "$cpid" 2>/dev/null || true
+      sleep 0.2
+      kill -9 "$cpid" 2>/dev/null || true
+      stopped=1
+    fi
+  fi
+
   if [[ -f watcher.pid ]]; then
     local wpid
     wpid=$(cat watcher.pid 2>/dev/null || true)
@@ -187,7 +222,7 @@ stop_vm() {
   fi
 
   if [[ "$CLEAN" == "1" ]]; then
-    rm -f qemu.pid watcher.pid
+    rm -f qemu.pid watcher.pid execprog_tail.pid execprog_trim.pid
   fi
 
   if [[ "$stopped" == "0" ]]; then
@@ -219,6 +254,28 @@ status_vm() {
     echo "[host] watcher: no watcher.pid"
   fi
 
+  if [[ -f execprog_tail.pid ]]; then
+    tpid=$(cat execprog_tail.pid 2>/dev/null || true)
+    if [[ -n "${tpid:-}" ]] && kill -0 "$tpid" 2>/dev/null; then
+      echo "[host] execprog_tail: running pid=$tpid"
+    else
+      echo "[host] execprog_tail: not running (execprog_tail.pid present: ${tpid:-empty})"
+    fi
+  else
+    echo "[host] execprog_tail: no execprog_tail.pid"
+  fi
+
+  if [[ -f execprog_trim.pid ]]; then
+    cpid=$(cat execprog_trim.pid 2>/dev/null || true)
+    if [[ -n "${cpid:-}" ]] && kill -0 "$cpid" 2>/dev/null; then
+      echo "[host] execprog_trim: running pid=$cpid"
+    else
+      echo "[host] execprog_trim: not running (execprog_trim.pid present: ${cpid:-empty})"
+    fi
+  else
+    echo "[host] execprog_trim: no execprog_trim.pid"
+  fi
+
   if [[ -f qemu-serial.log ]]; then
     echo "[host] qemu-serial.log: $(wc -l < qemu-serial.log) lines, $(ls -lh qemu-serial.log | awk '{print $5}')"
   else
@@ -228,6 +285,10 @@ status_vm() {
     echo "[host] watch_patterns.log: $(wc -l < watch_patterns.log) lines, $(ls -lh watch_patterns.log | awk '{print $5}')"
   else
     echo "[host] watch_patterns.log: missing"
+  fi
+
+  if [[ -f "$EXECPROG_STREAM_LOG" ]]; then
+    echo "[host] execprog_stream.log: $(wc -l < "$EXECPROG_STREAM_LOG") lines, $(ls -lh "$EXECPROG_STREAM_LOG" | awk '{print $5}')"
   fi
 }
 
@@ -247,6 +308,8 @@ echo "[host] qemu: MEM=$MEM SMP=$SMP HOSTFWD_PORT=$HOSTFWD_PORT PERSIST=$PERSIST
 stop_vm || true
 
 rm -f qemu.pid qemu-serial.log watch_patterns.log watcher.pid
+rm -f execprog_tail.pid
+rm -f execprog_trim.pid
 
 # Start QEMU
 qemu_env=(MEM="$MEM" SMP="$SMP" HOSTFWD_PORT="$HOSTFWD_PORT" PERSIST="$PERSIST" DAEMONIZE="$DAEMONIZE")
@@ -304,6 +367,35 @@ stage_log="$BUNDLE_DIR/.tmp_stage_run.$(date +%Y%m%d-%H%M%S).txt"
 } | tee "$stage_log"
 
 echo "[host] stage_log=$stage_log"
+
+# Optionally stream guest execprog.out to the host for better post-mortem when the VM panics.
+if [[ "$CAPTURE_EXECPROG" == "1" ]]; then
+  echo "[host] starting execprog.out stream -> $EXECPROG_STREAM_LOG"
+  rm -f "$EXECPROG_STREAM_LOG"
+  nohup ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 \
+    -p "$SSH_PORT" root@"$SSH_HOST" 'tail -n 0 -f /root/repro/execprog.out' \
+    >"$EXECPROG_STREAM_LOG" 2>&1 &
+  echo $! > "$BUNDLE_DIR/execprog_tail.pid"
+  echo "[host] execprog_tail_pid=$(cat "$BUNDLE_DIR/execprog_tail.pid")"
+
+  if [[ "$EXECPROG_STREAM_MAX_BYTES" != "0" ]]; then
+    echo "[host] trimming execprog stream: max_bytes=$EXECPROG_STREAM_MAX_BYTES every ${EXECPROG_STREAM_TRIM_SECS}s"
+    (
+      while true; do
+        sleep "$EXECPROG_STREAM_TRIM_SECS"
+        [[ -f "$EXECPROG_STREAM_LOG" ]] || continue
+        sz=$(stat -c%s "$EXECPROG_STREAM_LOG" 2>/dev/null || echo 0)
+        if [[ "$sz" -gt "$EXECPROG_STREAM_MAX_BYTES" ]]; then
+          tmp="$EXECPROG_STREAM_LOG.tmp"
+          tail -c "$EXECPROG_STREAM_MAX_BYTES" "$EXECPROG_STREAM_LOG" >"$tmp" 2>/dev/null || true
+          mv -f "$tmp" "$EXECPROG_STREAM_LOG" 2>/dev/null || true
+        fi
+      done
+    ) >/dev/null 2>&1 &
+    echo $! > "$BUNDLE_DIR/execprog_trim.pid"
+    echo "[host] execprog_trim_pid=$(cat "$BUNDLE_DIR/execprog_trim.pid")"
+  fi
+fi
 
 # Start watcher
 if [[ "$WATCH" == "1" ]]; then
