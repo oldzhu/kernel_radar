@@ -71,7 +71,9 @@ EXECPROG_EXTRA_ARGS=${EXECPROG_EXTRA_ARGS:-}
 
 # Monitoring
 WATCH=${WATCH:-1}
-WATCH_PATTERNS=${WATCH_PATTERNS:-'INFO: task|blocked for more than|hung task|vhost_worker_killed|BUG:|KASAN:|Kernel panic|panic - not syncing|Oops:'}
+WATCH_PATTERNS=${WATCH_PATTERNS:-'INFO: task|blocked for more than|hung task'\
+'|vhost_worker_killed|BUG:|KASAN:'\
+'|Kernel panic|panic - not syncing|Oops:'}
 
 # Auto-archive logs on first watcher hit.
 AUTO_ARCHIVE_ON_HIT=${AUTO_ARCHIVE_ON_HIT:-1}
