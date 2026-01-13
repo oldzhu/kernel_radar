@@ -90,3 +90,64 @@ Address→source mapping for local kernel (when diagnosing `__kmalloc_cache_nopr
 - Local kernel boots with the new fragment, SSH is stable.
 - `syz-execprog` is running and executing programs continuously (execprog stream counter increases).
 - No vhost hung-task signature captured yet; continue monitoring `watch_patterns.log` for `hung task`, `blocked for more than`, and `vhost_worker_killed`.
+
+## Late-session updates (auto-archive + higher concurrency)
+
+### Auto-archive-on-hit added
+
+Goal: make sure the first appearance of `hung task` / `vhost_worker_killed` / `Oops` / `panic` is snapshotted immediately under `repro/<extid>/runs/`.
+
+- New helper: `tools/archive_repro_run.sh`
+  - Creates `repro/<extid>/runs/<timestamp>[-tag]/`.
+  - Copies core logs (`qemu-serial.log`, `watch_patterns.log`, `execprog_stream.log`), plus `kernel.config`, `repro.syz`, and localimage kernel artifacts if present.
+  - Explicitly avoids copying large images like `disk.raw`.
+- Runner wiring: `tools/run_issue3_manual.sh`
+  - New knobs: `AUTO_ARCHIVE_ON_HIT=1`, `ARCHIVE_TAG=...`, `STOP_ON_HIT=1`.
+  - On the first watcher match, it archives and (optionally) stops the VM.
+
+Commits:
+
+- `81c14b2` tools: auto-archive repro run on watcher hit
+
+### Watcher robustness fixes
+
+Two small but important fixes landed while iterating:
+
+- Reset `.auto_archived_once` on clean starts so auto-archive triggers correctly across repeated runs.
+- Ensure the default `WATCH_PATTERNS` does not accidentally contain an embedded newline (which can cause confusing matches and noisy behavior).
+
+Commits:
+
+- `84db349` tools: reset auto-archive state each run
+- `a34595a` tools: prevent watcher newline pattern
+
+### High-concurrency run (to try to reproduce faster)
+
+We bumped the workload concurrency via `syz-execprog -procs`.
+
+Command used (local kernel + repro.local.syz, procs=12):
+
+- `cd /home/oldzhu/mylinux/kernel_radar && EXTID=a9528028ab4ca83e8bac \
+  USE_LOCALIMAGE=1 \
+  REPRO_SYZ=/home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac/repro.local.syz \
+  MEM=4096 SMP=4 TRACE_BUF_SIZE_KB=16384 SSH_WAIT_SECS=600 \
+  CAPTURE_EXECPROG=1 \
+  EXECPROG_PROCS=12 EXECPROG_THREADED=1 EXECPROG_REPEAT=0 \
+  AUTO_ARCHIVE_ON_HIT=1 STOP_ON_HIT=1 ARCHIVE_TAG=issue3-procs12 \
+  tools/run_issue3_manual.sh`
+
+Status check commands:
+
+- `cd /home/oldzhu/mylinux/kernel_radar && EXTID=a9528028ab4ca83e8bac tools/run_issue3_manual.sh --status`
+- `tail -n 30 repro/a9528028ab4ca83e8bac/execprog_stream.log`
+- `tail -f repro/a9528028ab4ca83e8bac/watch_patterns.log`
+
+### One-off cleanup: stale watcher pipelines
+
+We found multiple old `tail -F .../qemu-serial.log | egrep | tee -a .../watch_patterns.log` pipelines lingering in the process table from prior experiments. Those are not tracked by the current `watcher.pid`, but they can create confusing state.
+
+Cleanup commands used:
+
+- `pkill -f 'tail -n 0 -F /home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac/qemu-serial\.log' || true`
+- `pkill -f 'tee -a /home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac/watch_patterns\.log' || true`
+- `pkill -f 'egrep --line-buffered' || true`
