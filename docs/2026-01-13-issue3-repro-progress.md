@@ -206,3 +206,42 @@ Cleanup commands used:
 - `pkill -f 'tail -n 0 -F /home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac/qemu-serial\.log' || true`
 - `pkill -f 'tee -a /home/oldzhu/mylinux/kernel_radar/repro/a9528028ab4ca83e8bac/watch_patterns\.log' || true`
 - `pkill -f 'egrep --line-buffered' || true`
+
+## Tomorrow (2026-01-14) — pick 3 new issues checklist
+
+Goal: switch to three new syzbot issues efficiently, avoiding spending time on already-fixed reports.
+
+1) Select candidates
+
+- Use the pick guides:
+  - `docs/how-we-picked-top-3-syzbot-issues.md`
+  - `docs/how-we-picked-unclaimed-syzbot-issues.md`
+  - `docs/how-to-check-if-an-issue-is-already-being-worked.md`
+
+2) For each chosen extid, set up a repro folder and runner
+
+- Create `repro/<extid>/` with the syzbot bundle artifacts (`disk.raw`, `bzImage`, `repro.syz`, etc).
+- Clone the issue-3 runner pattern:
+  - `tools/run_issue3_manual.sh` (adapt into `tools/run_issueX_manual.sh` if needed)
+  - Keep auto-archive on watcher hit enabled.
+
+3) Fast “already fixed?” sanity check
+
+- Prefer booting the **bundle** kernel first.
+- If the suspected function is missing symbols/stripped, use the same address-based workflow:
+  - `ssh ... 'grep -m1 <symbol> /proc/kallsyms'`
+  - `scripts/extract-vmlinux bzImage > vmlinux.from_bzImage`
+  - `objdump --start-address/--stop-address ...`
+
+4) Start runs with stability-first defaults
+
+- Disable unrelated subsystems in a `repro.local.syz` if early crashes appear (like we did for wifi/ieee802154).
+- Keep `panic_on_oops=0 panic_on_warn=0` unless you explicitly need early stop.
+
+5) Archive and summarize
+
+- For each issue, collect the first “interesting” run in `repro/<extid>/runs/<ts>-<tag>/`.
+- Write one short daily note in `docs/YYYY-MM-DD-issueX-*.md` capturing:
+  - exact env vars / runner command
+  - signature / first stack
+  - hypothesis + next action
