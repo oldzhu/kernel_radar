@@ -334,6 +334,7 @@ echo "[host] qemu: MEM=$MEM SMP=$SMP HOSTFWD_PORT=$HOSTFWD_PORT PERSIST=$PERSIST
 stop_vm || true
 
 rm -f qemu.pid qemu-serial.log watch_patterns.log watcher.pid
+rm -f .auto_archived_once
 rm -f execprog_tail.pid
 rm -f execprog_trim.pid
 
@@ -452,6 +453,7 @@ fi
 # Start watcher
 if [[ "$WATCH" == "1" ]]; then
   echo "[host] starting serial-log watcher (patterns: $WATCH_PATTERNS)"
+  : > "$BUNDLE_DIR/watch_patterns.log"
   bash -c "set -euo pipefail; \
     serial='$BUNDLE_DIR/qemu-serial.log'; \
     out='$BUNDLE_DIR/watch_patterns.log'; \
