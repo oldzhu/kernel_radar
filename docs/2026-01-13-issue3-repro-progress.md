@@ -91,6 +91,61 @@ Address→source mapping for local kernel (when diagnosing `__kmalloc_cache_nopr
 - `syz-execprog` is running and executing programs continuously (execprog stream counter increases).
 - No vhost hung-task signature captured yet; continue monitoring `watch_patterns.log` for `hung task`, `blocked for more than`, and `vhost_worker_killed`.
 
+## vhost_worker_killed lock-order: commit, local patch, and bundle proof
+
+### Upstream commit that introduced vhost_worker_killed()
+
+In `~/mylinux/linux`, the vhost SIGKILL path (and the `vhost_worker_killed()` callback) was introduced by:
+
+- Commit: `db5247d9bf5c6ade9fd70b4e4897441e0269b233`
+- Subject: `vhost_task: Handle SIGKILL by flushing work and exiting`
+- Author: Mike Christie `<michael.christie@oracle.com>`
+- Files: `drivers/vhost/vhost.c`, `drivers/vhost/vhost.h`, `include/linux/sched/vhost_task.h`, `kernel/vhost_task.c`
+
+In that commit’s original implementation, `vhost_worker_killed()` holds `worker->mutex` while iterating `dev->vqs[]` and taking each `vq->mutex`. This creates an AB/BA deadlock risk with other paths that hold `vq->mutex` and then need `worker->mutex` (or vice versa), matching the syzbot hung-task signature we’re chasing.
+
+Verify on the local source tree:
+
+- `cd ~/mylinux/linux && git show db5247d9bf5c6ade9fd70b4e4897441e0269b233 -- drivers/vhost/vhost.c`
+
+### “Restructure” status in ~/mylinux/linux: it’s currently a local working-tree patch
+
+The “drop `worker->mutex` before taking `vq->mutex`, then re-acquire post-RCU to update attachment counters” behavior we discussed is **not** present as a committed change in `~/mylinux/linux` history right now. It exists as an **uncommitted local patch** in the working tree (likely added during debugging along with `trace_printk`-based lock tracing).
+
+Verify the local patch exists:
+
+- `cd ~/mylinux/linux && git diff -- drivers/vhost/vhost.c | less`
+- `cd ~/mylinux/linux && git blame -L 475,521 drivers/vhost/vhost.c`
+
+### Proving the downloaded syzbot bundle kernel still has the “old” behavior (binary)
+
+Because the bundle ELF we extracted from `bzImage` is stripped, we disassemble `vhost_worker_killed()` by **runtime address**:
+
+1) Boot the bundle kernel (A/B mode):
+
+- `cd ~/mylinux/kernel_radar && EXTID=a9528028ab4ca83e8bac USE_LOCALIMAGE=0 tools/run_issue3_manual.sh`
+
+2) Fetch the function’s runtime address from the guest:
+
+- `ssh -p 10022 root@127.0.0.1 'grep -m1 -w vhost_worker_killed /proc/kallsyms'`
+
+3) Extract vmlinux from `bzImage` (host-side) and disassemble by address:
+
+- `cd repro/a9528028ab4ca83e8bac && ~/mylinux/linux/scripts/extract-vmlinux bzImage > vmlinux.from_bzImage`
+- `objdump -d --no-show-raw-insn --start-address=<addr> --stop-address=$((<addr>+0x1200)) vmlinux.from_bzImage > tmp_disas_vhost_worker_killed_full.txt`
+
+4) Confirm lock ordering in the disassembly:
+
+- We see `mutex_lock_nested(&worker->mutex)` and later `mutex_lock_nested(&vq->mutex)` before the worker mutex is released.
+
+Saved artifact from this workflow:
+
+- `repro/a9528028ab4ca83e8bac/tmp_disas_vhost_worker_killed_full.txt`
+
+For convenience, this is now scripted:
+
+- `tools/disassemble_issue3_bundle_vhost_worker_killed.sh`
+
 ## Late-session updates (auto-archive + higher concurrency)
 
 ### Auto-archive-on-hit added
