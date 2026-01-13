@@ -14,7 +14,16 @@ LOCAL_DIR=${LOCAL_DIR:-"$BUNDLE_DIR/localimage"}
 LINUX_TREE=${LINUX_TREE:-"$HOME/mylinux/linux"}
 
 BASE_CONFIG=${BASE_CONFIG:-"$BUNDLE_DIR/kernel.config"}
-FRAG_CONFIG=${FRAG_CONFIG:-"$LOCAL_DIR/lockdep-trace-nonilfs.config"}
+
+# Prefer a tracked fragment in the repo (so changes get committed).
+# Backward-compat: if the old per-bundle fragment exists, keep using it.
+DEFAULT_FRAG_REPO="$REPO_ROOT/tools/issue3_localimage.fragment.config"
+DEFAULT_FRAG_BUNDLE="$LOCAL_DIR/lockdep-trace-nonilfs.config"
+if [[ -f "$DEFAULT_FRAG_BUNDLE" ]]; then
+  FRAG_CONFIG=${FRAG_CONFIG:-"$DEFAULT_FRAG_BUNDLE"}
+else
+  FRAG_CONFIG=${FRAG_CONFIG:-"$DEFAULT_FRAG_REPO"}
+fi
 BUILD_DIR=${BUILD_DIR:-"$LOCAL_DIR/build"}
 
 JOBS=${JOBS:-"$(nproc)"}

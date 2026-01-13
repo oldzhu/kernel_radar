@@ -41,6 +41,10 @@ SYZ_EXECPROG=${SYZ_EXECPROG:-"$SYZ_BIN/syz-execprog"}
 SYZ_EXECUTOR=${SYZ_EXECUTOR:-"$SYZ_BIN/syz-executor"}
 
 # Optional 9p share
+REPRO_SYZ=${REPRO_SYZ:-"$BUNDLE_DIR/repro.syz"}
+
+# Optional alternate repro file (keeps original syzbot bundle untouched).
+# Example: REPRO_SYZ=$BUNDLE_DIR/repro.local.syz
 USE_9P=${USE_9P:-0}
 SHARE_DIR=${SHARE_DIR:-""}
 SHARE_MOUNT=${SHARE_MOUNT:-/mnt/host}
@@ -113,7 +117,7 @@ What it does:
   1) Ensure bundle exists (or prompt you to run the downloader)
   2) Restart QEMU (daemon mode by default)
   3) Wait for SSH to become reachable
-  4) scp syz-execprog/syz-executor + repro.syz into /root/repro
+  4) scp syz-execprog/syz-executor + repro file into /root/repro (as repro.syz)
   5) Start syz-execprog in the background in the guest
   6) Start a host-side serial-log watcher (optional)
 EOF
@@ -372,13 +376,16 @@ stage_log="$BUNDLE_DIR/.tmp_stage_run.$(date +%Y%m%d-%H%M%S).txt"
 {
   echo "[host] stage_start $(date -Is)"
   echo "[host] local_bins:";
-  ls -l "$SYZ_EXECPROG" "$SYZ_EXECUTOR" "$BUNDLE_DIR/repro.syz"
+  ls -l "$SYZ_EXECPROG" "$SYZ_EXECUTOR" "$REPRO_SYZ"
   echo "[host] mkdir /root/repro";
   ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT" root@"$SSH_HOST" 'mkdir -p /root/repro'
   echo "[host] scp binaries+repro";
   scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    "$SYZ_EXECPROG" "$SYZ_EXECUTOR" "$BUNDLE_DIR/repro.syz" \
+    "$SYZ_EXECPROG" "$SYZ_EXECUTOR" \
     root@"$SSH_HOST":/root/repro/
+  scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    "$REPRO_SYZ" \
+    root@"$SSH_HOST":/root/repro/repro.syz
 
   # Keep the VM alive longer: kernel cmdline doesn't support panic_on_oops=0,
   # and syzbot images often default panic_on_oops/panic_on_warn to 1.
