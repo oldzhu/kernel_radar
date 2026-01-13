@@ -73,6 +73,11 @@ EXECPROG_EXTRA_ARGS=${EXECPROG_EXTRA_ARGS:-}
 WATCH=${WATCH:-1}
 WATCH_PATTERNS=${WATCH_PATTERNS:-'INFO: task|blocked for more than|hung task|vhost_worker_killed|BUG:|KASAN:|panic|Oops'}
 
+# Auto-archive logs on first watcher hit.
+AUTO_ARCHIVE_ON_HIT=${AUTO_ARCHIVE_ON_HIT:-1}
+ARCHIVE_TAG=${ARCHIVE_TAG:-""}
+STOP_ON_HIT=${STOP_ON_HIT:-0}
+
 # Optional: stream guest /root/repro/execprog.out to a host file via a long-lived ssh tail.
 # Useful when execprog is run with -output/-debug so we can preserve the last printed program.
 CAPTURE_EXECPROG=${CAPTURE_EXECPROG:-0}
@@ -100,6 +105,9 @@ Environment overrides:
   USE_9P=0|1           enable 9p share (default: $USE_9P)
   SHARE_DIR=...        host dir to share (required if USE_9P=1)
   WATCH=0|1            start serial-log watcher (default: $WATCH)
+  AUTO_ARCHIVE_ON_HIT=0|1 archive logs on first watcher hit (default: $AUTO_ARCHIVE_ON_HIT)
+  ARCHIVE_TAG=...      suffix for runs/<timestamp>-<tag>/ (default: empty)
+  STOP_ON_HIT=0|1      stop VM after archiving (default: $STOP_ON_HIT)
   EXECPROG_SANDBOX=... syz-execprog -sandbox (default: $EXECPROG_SANDBOX)
   EXECPROG_PROCS=...   syz-execprog -procs (default: $EXECPROG_PROCS)
   EXECPROG_THREADED=0|1 syz-execprog -threaded (default: $EXECPROG_THREADED)
@@ -444,9 +452,27 @@ fi
 # Start watcher
 if [[ "$WATCH" == "1" ]]; then
   echo "[host] starting serial-log watcher (patterns: $WATCH_PATTERNS)"
-  bash -c "stdbuf -oL tail -n 0 -F '$BUNDLE_DIR/qemu-serial.log' | \
-    stdbuf -oL egrep --line-buffered '$WATCH_PATTERNS' | \
-    tee -a '$BUNDLE_DIR/watch_patterns.log'" \
+  bash -c "set -euo pipefail; \
+    serial='$BUNDLE_DIR/qemu-serial.log'; \
+    out='$BUNDLE_DIR/watch_patterns.log'; \
+    flag='$BUNDLE_DIR/.auto_archived_once'; \
+    stdbuf -oL tail -n 0 -F \"\$serial\" | \
+      stdbuf -oL egrep --line-buffered '$WATCH_PATTERNS' | \
+      while IFS= read -r line; do \
+        printf '%s\n' \"\$line\" | tee -a \"\$out\" >/dev/null; \
+        if [[ '$AUTO_ARCHIVE_ON_HIT' == '1' ]] && [[ ! -f \"\$flag\" ]]; then \
+          : >\"\$flag\"; \
+          TAG='$ARCHIVE_TAG' \
+          REPRO_SYZ='$REPRO_SYZ' \
+          KERNEL_IMAGE='$KERNEL_IMAGE' \
+          USE_LOCALIMAGE='$USE_LOCALIMAGE' \
+          MEM='$MEM' SMP='$SMP' HOSTFWD_PORT='$HOSTFWD_PORT' APPEND_EXTRA='$APPEND_EXTRA' \
+            '$REPO_ROOT/tools/archive_repro_run.sh' '$BUNDLE_DIR' || true; \
+          if [[ '$STOP_ON_HIT' == '1' ]]; then \
+            EXTID='$EXTID' REPO_ROOT='$REPO_ROOT' BUNDLE_DIR='$BUNDLE_DIR' '$REPO_ROOT/tools/run_issue3_manual.sh' --stop || true; \
+          fi; \
+        fi; \
+      done" \
     >/dev/null 2>&1 &
   echo $! > "$BUNDLE_DIR/watcher.pid"
   echo "[host] watcher_pid=$(cat "$BUNDLE_DIR/watcher.pid")"
