@@ -70,6 +70,7 @@ HARDWARE_TITLE_RE = re.compile(
 class Candidate:
     title: str
     bug_url: str
+    extid: str | None
     status: str | None
     subsystems: list[str]
     kernel_config: str | None
@@ -163,7 +164,62 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--scan-limit", type=int, default=1500)
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--sleep", type=float, default=0.1)
+    ap.add_argument(
+        "--include-title-re",
+        default=None,
+        help="only consider bugs whose title matches this regex (case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-title-re",
+        default=None,
+        help=(
+            "exclude bugs whose title matches this regex (case-insensitive); "
+            "default is a hardware-ish filter"
+        ),
+    )
+    ap.add_argument(
+        "--no-exclude-title",
+        action="store_true",
+        help="do not apply the default title exclusion filter",
+    )
+    ap.add_argument(
+        "--include-subsystem",
+        action="append",
+        default=[],
+        help="only consider bugs whose syzbot subsystems include this (repeatable; case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-subsystem",
+        action="append",
+        default=[],
+        help="exclude bugs whose syzbot subsystems include this (repeatable; case-insensitive)",
+    )
+    ap.add_argument(
+        "--include-subsystem-re",
+        default=None,
+        help="only consider bugs whose syzbot subsystems match this regex (case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-subsystem-re",
+        default=None,
+        help="exclude bugs whose syzbot subsystems match this regex (case-insensitive)",
+    )
     args = ap.parse_args(argv)
+
+    include_re = re.compile(args.include_title_re, re.I) if args.include_title_re else None
+    if args.no_exclude_title:
+        exclude_re = None
+    else:
+        exclude_re = re.compile(args.exclude_title_re, re.I) if args.exclude_title_re else HARDWARE_TITLE_RE
+
+    include_subsystems = {s.strip().lower() for s in args.include_subsystem if s and s.strip()}
+    exclude_subsystems = {s.strip().lower() for s in args.exclude_subsystem if s and s.strip()}
+    include_subsystem_re = (
+        re.compile(args.include_subsystem_re, re.I) if args.include_subsystem_re else None
+    )
+    exclude_subsystem_re = (
+        re.compile(args.exclude_subsystem_re, re.I) if args.exclude_subsystem_re else None
+    )
 
     upstream_json = http_get_text(BASE + "/upstream?json=1", timeout=args.timeout)
     data = json.loads(upstream_json)
@@ -183,12 +239,30 @@ def main(argv: list[str]) -> int:
             continue
         seen_titles.add(title)
 
-        if HARDWARE_TITLE_RE.search(title):
+        if include_re and not include_re.search(title):
+            continue
+
+        if exclude_re and exclude_re.search(title):
             continue
 
         try:
             scraped = scrape_bug_page(link, timeout=args.timeout)
         except Exception:
+            continue
+
+        subsystems = list(scraped.get("subsystems") or [])
+        subsystems_lc = [s.strip().lower() for s in subsystems if isinstance(s, str) and s.strip()]
+
+        if include_subsystems and not any(s in include_subsystems for s in subsystems_lc):
+            continue
+
+        if include_subsystem_re and not any(include_subsystem_re.search(s) for s in subsystems_lc):
+            continue
+
+        if exclude_subsystems and any(s in exclude_subsystems for s in subsystems_lc):
+            continue
+
+        if exclude_subsystem_re and any(exclude_subsystem_re.search(s) for s in subsystems_lc):
             continue
 
         # must have repro
@@ -207,8 +281,14 @@ def main(argv: list[str]) -> int:
             Candidate(
                 title=str(scraped.get("title") or title),
                 bug_url=BASE + link if link.startswith("/") else link,
+                extid=(
+                    urllib.parse.parse_qs(urllib.parse.urlparse(BASE + link).query)
+                    .get("extid", [None])[0]
+                    if link.startswith("/")
+                    else urllib.parse.parse_qs(urllib.parse.urlparse(link).query).get("extid", [None])[0]
+                ),
                 status=scraped.get("status") if isinstance(scraped.get("status"), str) else None,
-                subsystems=list(scraped.get("subsystems") or []),
+                subsystems=subsystems,
                 kernel_config=scraped.get("kernel_config") if isinstance(scraped.get("kernel_config"), str) else None,
                 repro_c=scraped.get("repro_c") if isinstance(scraped.get("repro_c"), str) else None,
                 repro_syz=scraped.get("repro_syz") if isinstance(scraped.get("repro_syz"), str) else None,
@@ -225,6 +305,8 @@ def main(argv: list[str]) -> int:
 
     for c in picked:
         print(f"\n- {c.title}")
+        if c.extid:
+            print(f"  extid: {c.extid}")
         print(f"  bug: {c.bug_url}")
         if c.status:
             print(f"  status: {c.status}")

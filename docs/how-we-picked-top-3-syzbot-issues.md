@@ -142,6 +142,24 @@ Run it from the repo root:
 ./tools/syzbot_pick_top3.py --scan-limit 800 --count 3
 ```
 
+Targeting specific areas (cgroup/namespaces/scheduler/GPU):
+
+```bash
+# Filter by syzbot subsystem labels (best when they match what you want):
+./tools/syzbot_pick_top3.py --count 3 --include-subsystem cgroup
+./tools/syzbot_pick_top3.py --count 3 --include-subsystem namespaces
+./tools/syzbot_pick_top3.py --count 3 --include-subsystem scheduler
+
+# Or filter by title keyword regex:
+./tools/syzbot_pick_top3.py --count 3 --include-title-re 'cgroup|memcg'
+./tools/syzbot_pick_top3.py --count 3 --include-title-re 'namespace|setns|unshare|nsfs'
+./tools/syzbot_pick_top3.py --count 3 --include-title-re 'sched|scheduler|cfs|rtmutex'
+
+# GPU/DRM note: the default title exclusion includes drm/amdgpu/nouveau.
+# If you intentionally want GPU bugs, disable the default exclude filter:
+./tools/syzbot_pick_top3.py --count 3 --no-exclude-title --include-title-re 'drm|amdgpu|nouveau'
+```
+
 
 ### D) Preview a C reproducer quickly
 Purpose: confirm a repro doesn’t require special hardware and is “normal syscalls”.

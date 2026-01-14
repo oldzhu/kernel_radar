@@ -55,6 +55,27 @@ Run examples:
 ./tools/syzbot_pick_unclaimed.py --count 5 --scan-limit 2000
 ```
 
+Targeting specific areas (cgroup/namespaces/scheduler/GPU):
+
+```bash
+# Prefer filtering by syzbot subsystem labels when possible:
+./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem cgroup
+./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem scheduler
+./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem namespaces
+
+# Or by regex over subsystem labels:
+./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem-re '^(cgroup|memcg)$'
+
+# Or by keywords in the title (useful when subsystem labels are surprising):
+./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'cgroup|memcg'
+./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'namespace|setns|unshare|nsfs'
+./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'sched|scheduler|cfs|rtmutex'
+
+# GPU/DRM note: the default title exclusion includes drm/amdgpu/nouveau.
+# If you intentionally want GPU bugs, disable the default exclude filter:
+./tools/syzbot_pick_unclaimed.py --count 3 --no-exclude-title --include-title-re 'drm|amdgpu|nouveau'
+```
+
 
 ## Relationship to existing scripts
 

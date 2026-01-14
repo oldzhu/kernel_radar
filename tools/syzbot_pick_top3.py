@@ -40,6 +40,7 @@ import json
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
@@ -49,6 +50,7 @@ UA = {"User-Agent": "kernel_radar/0.1 (+local)"}
 
 @dataclass(frozen=True)
 class Candidate:
+    extid: str | None
     title: str
     bug_url: str
     status: str | None
@@ -126,12 +128,86 @@ def looks_hardware_specific(title: str) -> bool:
     )
 
 
+def extract_extid(bug_url: str) -> str | None:
+    try:
+        u = urllib.parse.urlparse(bug_url)
+        qs = urllib.parse.parse_qs(u.query)
+        extids = qs.get("extid")
+        if extids:
+            return str(extids[0])
+    except Exception:
+        return None
+    return None
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--count", type=int, default=3)
     ap.add_argument("--scan-limit", type=int, default=400)
     ap.add_argument("--sleep", type=float, default=0.2, help="sleep between bug page fetches")
+    ap.add_argument(
+        "--include-title-re",
+        default=None,
+        help="only consider bugs whose title matches this regex (case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-title-re",
+        default=None,
+        help=(
+            "exclude bugs whose title matches this regex (case-insensitive); "
+            "default is a hardware-ish filter"
+        ),
+    )
+    ap.add_argument(
+        "--no-exclude-title",
+        action="store_true",
+        help="do not apply the default title exclusion filter",
+    )
+    ap.add_argument(
+        "--include-subsystem",
+        action="append",
+        default=[],
+        help="only consider bugs whose syzbot subsystems include this (repeatable; case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-subsystem",
+        action="append",
+        default=[],
+        help="exclude bugs whose syzbot subsystems include this (repeatable; case-insensitive)",
+    )
+    ap.add_argument(
+        "--include-subsystem-re",
+        default=None,
+        help="only consider bugs whose syzbot subsystems match this regex (case-insensitive)",
+    )
+    ap.add_argument(
+        "--exclude-subsystem-re",
+        default=None,
+        help="exclude bugs whose syzbot subsystems match this regex (case-insensitive)",
+    )
     args = ap.parse_args(argv)
+
+    include_re = re.compile(args.include_title_re, re.I) if args.include_title_re else None
+    if args.no_exclude_title:
+        exclude_re = None
+    else:
+        exclude_re = (
+            re.compile(args.exclude_title_re, re.I)
+            if args.exclude_title_re
+            else re.compile(
+                r"usb|bluetooth|wifi|iwlwifi|ath|drm|amdgpu|nouveau|sound|snd_|nvme|scsi|mmc|rtc|i2c|spi|hid",
+                re.I,
+            )
+        )
+
+    include_subsystems = {s.strip().lower() for s in args.include_subsystem if s and s.strip()}
+    exclude_subsystems = {s.strip().lower() for s in args.exclude_subsystem if s and s.strip()}
+    include_subsystem_re = (
+        re.compile(args.include_subsystem_re, re.I) if args.include_subsystem_re else None
+    )
+    exclude_subsystem_re = (
+        re.compile(args.exclude_subsystem_re, re.I) if args.exclude_subsystem_re else None
+    )
 
     upstream_json = http_get_text(BASE + "/upstream?json=1")
     data = json.loads(upstream_json)
@@ -148,13 +224,31 @@ def main(argv: list[str]) -> int:
         if not title or not link:
             continue
 
-        if looks_hardware_specific(title):
+        if include_re and not include_re.search(title):
+            continue
+
+        if exclude_re and exclude_re.search(title):
             continue
 
         # We only consider issues that have reproducers embedded on the bug page.
         try:
             scraped = scrape_bug_page(link)
         except Exception:
+            continue
+
+        subsystems = list(scraped.get("subsystems") or [])
+        subsystems_lc = [s.strip().lower() for s in subsystems if isinstance(s, str) and s.strip()]
+
+        if include_subsystems and not any(s in include_subsystems for s in subsystems_lc):
+            continue
+
+        if include_subsystem_re and not any(include_subsystem_re.search(s) for s in subsystems_lc):
+            continue
+
+        if exclude_subsystems and any(s in exclude_subsystems for s in subsystems_lc):
+            continue
+
+        if exclude_subsystem_re and any(exclude_subsystem_re.search(s) for s in subsystems_lc):
             continue
 
         repro_c_url = scraped.get("repro_c_url")
@@ -164,10 +258,11 @@ def main(argv: list[str]) -> int:
 
         found.append(
             Candidate(
+                extid=extract_extid(BASE + link if link.startswith("/") else link),
                 title=title,
                 bug_url=BASE + link if link.startswith("/") else link,
                 status=scraped.get("status") if isinstance(scraped.get("status"), str) else None,
-                subsystems=list(scraped.get("subsystems") or []),
+                subsystems=subsystems,
                 kernel_config_url=scraped.get("kernel_config_url") if isinstance(scraped.get("kernel_config_url"), str) else None,
                 repro_c_url=repro_c_url if isinstance(repro_c_url, str) else None,
                 repro_syz_url=repro_syz_url if isinstance(repro_syz_url, str) else None,
@@ -182,6 +277,8 @@ def main(argv: list[str]) -> int:
 
     for c in found:
         print(f"\n- {c.title}")
+        if c.extid:
+            print(f"  extid: {c.extid}")
         print(f"  bug: {c.bug_url}")
         if c.status:
             print(f"  status: {c.status}")
