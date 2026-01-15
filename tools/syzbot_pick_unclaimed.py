@@ -48,6 +48,7 @@ Prints a shortlist with:
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 import time
@@ -144,6 +145,11 @@ def scrape_bug_page(link: str, timeout: int) -> dict[str, object]:
         if subj and "[PATCH" in subj.upper():
             patch_threads.append(t)
 
+    fix_signals: list[str] = []
+    for kw in ["upstream: fixed", "fixed:", "Fix commit", "Fixing commit", "Resolved", "dup"]:
+        if kw.lower() in html.lower():
+            fix_signals.append(kw)
+
     return {
         "title": title,
         "status": status_text,
@@ -155,7 +161,20 @@ def scrape_bug_page(link: str, timeout: int) -> dict[str, object]:
         "crash_report": pick("CrashReport"),
         "lore_threads": lore_threads,
         "patch_threads": patch_threads,
+        "fix_signals": fix_signals,
     }
+
+
+def parse_reported_date(status_text: str) -> dt.date | None:
+    # Example:
+    #   upstream: reported C repro on 2026/01/13 18:06
+    m = re.search(r"\breported\b.*\bon\s+(\d{4}/\d{2}/\d{2})\b", status_text, re.I)
+    if not m:
+        return None
+    try:
+        return dt.datetime.strptime(m.group(1), "%Y/%m/%d").date()
+    except Exception:
+        return None
 
 
 def main(argv: list[str]) -> int:
@@ -164,6 +183,17 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--scan-limit", type=int, default=1500)
     ap.add_argument("--timeout", type=int, default=20)
     ap.add_argument("--sleep", type=float, default=0.1)
+    ap.add_argument(
+        "--reported-after",
+        default=None,
+        help="only keep bugs whose status includes a 'reported ... on YYYY/MM/DD' date on/after this day",
+    )
+    ap.add_argument(
+        "--max-age-days",
+        type=int,
+        default=None,
+        help="only keep bugs reported within the last N days (requires a parseable reported date)",
+    )
     ap.add_argument(
         "--include-title-re",
         default=None,
@@ -205,6 +235,15 @@ def main(argv: list[str]) -> int:
         help="exclude bugs whose syzbot subsystems match this regex (case-insensitive)",
     )
     args = ap.parse_args(argv)
+
+    reported_after: dt.date | None = None
+    if args.reported_after:
+        try:
+            reported_after = dt.datetime.strptime(args.reported_after, "%Y/%m/%d").date()
+        except Exception:
+            raise SystemExit("--reported-after must be in YYYY/MM/DD format")
+    if args.max_age_days is not None and args.max_age_days < 0:
+        raise SystemExit("--max-age-days must be >= 0")
 
     include_re = re.compile(args.include_title_re, re.I) if args.include_title_re else None
     if args.no_exclude_title:
@@ -272,6 +311,21 @@ def main(argv: list[str]) -> int:
         status_text = str(scraped.get("status") or "")
         if any(x in status_text.lower() for x in ["fixed", "invalid", "dup"]):
             continue
+
+        # Exclude if the bug page contains explicit fix-ish signals (including dup).
+        if scraped.get("fix_signals"):
+            continue
+
+        if reported_after or args.max_age_days is not None:
+            d = parse_reported_date(status_text)
+            if not d:
+                continue
+            if reported_after and d < reported_after:
+                continue
+            if args.max_age_days is not None:
+                cutoff = dt.date.today() - dt.timedelta(days=args.max_age_days)
+                if d < cutoff:
+                    continue
 
         # exclude if any linked lore /T/ subject contains [PATCH]
         if scraped.get("patch_threads"):
