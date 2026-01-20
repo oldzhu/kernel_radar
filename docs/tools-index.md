@@ -46,6 +46,15 @@ Standing collaboration rules and project goal live in `.github/copilot-instructi
   - `./tools/syzbot_prepare_qemu_repro.py --extid <extid>`
   - Output: `repro/<extid>/run_qemu.sh`
 
+Network/robustness flags:
+
+- Resuming `.part` downloads is enabled by default (uses HTTP Range when supported)
+- Retry/backoff: `--retries N`
+- Timeouts:
+  - `--timeout SECONDS` (bug page + small text attachments)
+  - `--asset-timeout SECONDS` (large assets: disk/bzImage/vmlinux)
+- Disable resume (always start fresh): `--no-resume`
+
 ## Lore thread followups
 
 - Summarize a lore thread (follow-ups):

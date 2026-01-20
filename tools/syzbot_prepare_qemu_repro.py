@@ -36,6 +36,7 @@ import os
 import re
 import sys
 import textwrap
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,27 +58,27 @@ class BugLinks:
     crash_report: str | None
 
 
-def http_get_bytes(url: str) -> bytes:
+def http_get_bytes(url: str, *, timeout: int) -> bytes:
     if url.startswith("/"):
         url = BASE + url
     req = urllib.request.Request(url, headers=UA)
     # For small resources (HTML pages and /text?tag=... attachments).
     # Large assets are streamed via `download_stream`.
-    with urllib.request.urlopen(req, timeout=60) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
-def http_get_text(url: str) -> str:
-    return http_get_bytes(url).decode("utf-8", "replace")
+def http_get_text(url: str, *, timeout: int) -> str:
+    return http_get_bytes(url, timeout=timeout).decode("utf-8", "replace")
 
 
 def html_unescape_amp(s: str) -> str:
     return s.replace("&amp;", "&")
 
 
-def scrape_bug_page(extid: str) -> BugLinks:
+def scrape_bug_page(extid: str, *, timeout: int) -> BugLinks:
     bug_url = f"{BASE}/bug?extid={extid}"
-    html = http_get_text(bug_url)
+    html = http_get_text(bug_url, timeout=timeout)
 
     # /text?tag=...&x=... links
     text_links = [html_unescape_amp(x) for x in re.findall(r"(/text\?tag=[^\"\s<>]+)", html)]
@@ -111,20 +112,73 @@ def scrape_bug_page(extid: str) -> BugLinks:
     )
 
 
-def download_stream(url: str, out_path: Path, *, force: bool, timeout: int = 600) -> None:
+def download_stream(
+    url: str,
+    out_path: Path,
+    *,
+    force: bool,
+    timeout: int,
+    retries: int,
+    resume: bool,
+) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if out_path.exists() and not force:
         return
 
     tmp = out_path.with_suffix(out_path.suffix + ".part")
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=timeout) as r, tmp.open("wb") as f:
-        while True:
-            chunk = r.read(4 * 1024 * 1024)
-            if not chunk:
+
+    if force:
+        try:
+            if tmp.exists() or tmp.is_symlink():
+                tmp.unlink()
+        except OSError:
+            pass
+
+    last_err: Exception | None = None
+    for attempt in range(max(0, retries) + 1):
+        try:
+            start = 0
+            if resume and tmp.exists() and not out_path.exists() and not force:
+                try:
+                    start = tmp.stat().st_size
+                except OSError:
+                    start = 0
+
+            headers = dict(UA)
+            if start > 0:
+                headers["Range"] = f"bytes={start}-"
+
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                status = getattr(r, "status", None) or r.getcode()
+                # If server ignored Range (200), restart from scratch.
+                if start > 0 and status != 206:
+                    start = 0
+                mode = "ab" if start > 0 else "wb"
+                with tmp.open(mode) as f:
+                    while True:
+                        chunk = r.read(4 * 1024 * 1024)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+
+            tmp.replace(out_path)
+            return
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            last_err = e
+            if attempt >= retries:
                 break
-            f.write(chunk)
-    tmp.replace(out_path)
+            sleep_s = min(60.0, 2.0 ** attempt)
+            print(
+                f"Warning: download failed (attempt {attempt + 1}/{retries + 1}): {e}",
+                file=sys.stderr,
+            )
+            print(f"Retrying in {sleep_s:.1f}s...", file=sys.stderr)
+            time.sleep(sleep_s)
+
+    raise RuntimeError(f"Failed to download after {retries + 1} attempts: {url} ({last_err})")
 
 
 def decompress_xz(in_path: Path, out_path: Path, *, force: bool) -> None:
@@ -258,6 +312,29 @@ def main(argv: list[str]) -> int:
     )
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
     ap.add_argument(
+        "--timeout",
+        type=int,
+        default=60,
+        help="HTTP timeout (seconds) for bug page and small text attachments",
+    )
+    ap.add_argument(
+        "--asset-timeout",
+        type=int,
+        default=600,
+        help="HTTP timeout (seconds) for large assets (disk/bzImage/vmlinux)",
+    )
+    ap.add_argument(
+        "--retries",
+        type=int,
+        default=5,
+        help="retry failed downloads up to N times (exponential backoff)",
+    )
+    ap.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="disable resuming from existing .part files (always start fresh)",
+    )
+    ap.add_argument(
         "--regen-runner",
         action="store_true",
         help="only (re)generate run_qemu.sh; do not download/decompress attachments or assets",
@@ -272,7 +349,7 @@ def main(argv: list[str]) -> int:
     out_dir = Path(args.out or f"repro/{args.extid}")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    links = scrape_bug_page(args.extid)
+    links = scrape_bug_page(args.extid, timeout=args.timeout)
 
     # Save metadata for debugging / provenance.
     meta = (out_dir / "meta.txt")
@@ -307,7 +384,7 @@ def main(argv: list[str]) -> int:
         for p in [
             out_dir / "vmlinux",
             out_dir / "vmlinux.xz",
-            out_dir / "vmlinux.part",
+            out_dir / "vmlinux.xz.part",
         ]:
             try:
                 if p.exists() or p.is_symlink():
@@ -317,7 +394,14 @@ def main(argv: list[str]) -> int:
 
         vmlinux_xz_path = out_dir / "vmlinux.xz"
         print(f"Re-downloading vmlinux: {links.vmlinux_xz}")
-        download_stream(links.vmlinux_xz, vmlinux_xz_path, force=True)
+        download_stream(
+            links.vmlinux_xz,
+            vmlinux_xz_path,
+            force=True,
+            timeout=args.asset_timeout,
+            retries=args.retries,
+            resume=not args.no_resume,
+        )
 
         try:
             decompress_xz(vmlinux_xz_path, out_dir / "vmlinux", force=True)
@@ -338,14 +422,35 @@ def main(argv: list[str]) -> int:
     disk_xz_path = out_dir / "disk.raw.xz"
     bz_xz_path = out_dir / "bzImage.xz"
     print(f"Downloading: {links.disk_xz}")
-    download_stream(links.disk_xz, disk_xz_path, force=args.force)
+    download_stream(
+        links.disk_xz,
+        disk_xz_path,
+        force=args.force,
+        timeout=args.asset_timeout,
+        retries=args.retries,
+        resume=not args.no_resume,
+    )
     print(f"Downloading: {links.bzimage_xz}")
-    download_stream(links.bzimage_xz, bz_xz_path, force=args.force)
+    download_stream(
+        links.bzimage_xz,
+        bz_xz_path,
+        force=args.force,
+        timeout=args.asset_timeout,
+        retries=args.retries,
+        resume=not args.no_resume,
+    )
 
     if links.vmlinux_xz:
         vmlinux_xz_path = out_dir / "vmlinux.xz"
         print(f"Downloading: {links.vmlinux_xz}")
-        download_stream(links.vmlinux_xz, vmlinux_xz_path, force=args.force)
+        download_stream(
+            links.vmlinux_xz,
+            vmlinux_xz_path,
+            force=args.force,
+            timeout=args.asset_timeout,
+            retries=args.retries,
+            resume=not args.no_resume,
+        )
 
     # Decompress to the filenames the run script expects.
     decompress_xz(bz_xz_path, out_dir / "bzImage", force=args.force)
@@ -359,15 +464,19 @@ def main(argv: list[str]) -> int:
 
     # Fetch text attachments.
     if links.kernel_config:
-        write_text(out_dir / "kernel.config", http_get_text(links.kernel_config), force=args.force)
+        write_text(
+            out_dir / "kernel.config",
+            http_get_text(links.kernel_config, timeout=args.timeout),
+            force=args.force,
+        )
     if links.repro_syz:
-        write_text(out_dir / "repro.syz", http_get_text(links.repro_syz), force=args.force)
+        write_text(out_dir / "repro.syz", http_get_text(links.repro_syz, timeout=args.timeout), force=args.force)
     if links.repro_log:
-        write_text(out_dir / "repro.log", http_get_text(links.repro_log), force=args.force)
+        write_text(out_dir / "repro.log", http_get_text(links.repro_log, timeout=args.timeout), force=args.force)
     if links.crash_log:
-        write_text(out_dir / "crash.log", http_get_text(links.crash_log), force=args.force)
+        write_text(out_dir / "crash.log", http_get_text(links.crash_log, timeout=args.timeout), force=args.force)
     if links.crash_report:
-        write_text(out_dir / "crash.report", http_get_text(links.crash_report), force=args.force)
+        write_text(out_dir / "crash.report", http_get_text(links.crash_report, timeout=args.timeout), force=args.force)
 
     write_run_qemu_sh(out_dir, force=args.force)
 
