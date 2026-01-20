@@ -2,6 +2,17 @@
 
 This is the “what tool do I use for X?” entry point.
 
+## Session checklist
+
+Before ending a work session:
+
+- Update or add a dated progress note under `docs/` (what we tried/learned/next).
+- Save any ad-hoc snippet as a reusable script under `tools/`.
+- Update this tools index if tooling/flags/workflows changed.
+- Commit docs/tools changes in a coherent commit.
+
+Standing collaboration rules and project goal live in `copilot-instructions.md`.
+
 ## Picking issues
 
 - Pick reproducible starter issues (no lore checks):
