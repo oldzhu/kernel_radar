@@ -11,7 +11,7 @@ Before ending a work session:
 - Update this tools index if tooling/flags/workflows changed.
 - Commit docs/tools changes in a coherent commit.
 
-Standing collaboration rules and project goal live in `copilot-instructions.md`.
+Standing collaboration rules and project goal live in `.github/copilot-instructions.md`.
 
 ## Picking issues
 
