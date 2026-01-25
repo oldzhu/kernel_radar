@@ -229,6 +229,16 @@ DAEMONIZE=${DAEMONIZE:-0}
 SERIAL_LOG=${SERIAL_LOG:-"$DIR/qemu-serial.log"}
 PIDFILE=${PIDFILE:-"$DIR/qemu.pid"}
 
+# Optional acceleration.
+# By default, QEMU runs with TCG (software emulation). For syzbot kernels with heavy
+# debugging instrumentation, TCG can be extremely slow and can cause apparent
+# RCU stalls/softlockups just from CPU starvation.
+#
+# If your host supports KVM, run with:
+#   ENABLE_KVM=1 CPU=host ./run_qemu.sh
+ENABLE_KVM=${ENABLE_KVM:-0}
+CPU=${CPU:-""}
+
 # Optional host->guest file sharing (9p over virtio).
 # Usage:
 #   SHARE_DIR=$PWD SHARE_MOUNT=/mnt/host ./run_qemu.sh
@@ -272,8 +282,21 @@ if [[ -n "$SHARE_DIR" ]]; then
     )
 fi
 
+accel_args=()
+if [[ "$ENABLE_KVM" == "1" ]]; then
+    if [[ ! -c /dev/kvm ]]; then
+        echo "ENABLE_KVM=1 but /dev/kvm is not available on this host." >&2
+        exit 3
+    fi
+    accel_args+=( -enable-kvm )
+    if [[ -n "$CPU" ]]; then
+        accel_args+=( -cpu "$CPU" )
+    fi
+fi
+
 exec "$QEMU_BIN" \
   -m "$MEM" -smp "$SMP" \
+        "${accel_args[@]}" \
   -kernel "$DIR/bzImage" \
     -append "console=ttyS0 root=/dev/vda1 rootwait rw earlyprintk=serial net.ifnames=0" \
   -drive "file=$DIR/disk.raw,format=raw,if=virtio" \

@@ -46,6 +46,11 @@ Standing collaboration rules and project goal live in `.github/copilot-instructi
   - `./tools/syzbot_prepare_qemu_repro.py --extid <extid>`
   - Output: `repro/<extid>/run_qemu.sh`
 
+Runner env vars (in `repro/<extid>/run_qemu.sh`):
+
+- `ENABLE_KVM=1` enables KVM acceleration (requires `/dev/kvm`).
+- `CPU=host` selects the host CPU model (recommended when using KVM).
+
 Network/robustness flags:
 
 - Resuming `.part` downloads is enabled by default (uses HTTP Range when supported)
