@@ -40,6 +40,24 @@ Make monitoring and contribution to Linux kernel development easy and automated.
 - When adding docs/tools improvements, stage and commit them as coherent commits with descriptive messages.
 - Keep commits scoped (avoid mixing unrelated refactors).
 
+### 6) Bilingual documentation policy (English + 简体中文)
+
+From now on, **all new documents/reports** created in this repo must have both:
+- an English Markdown file, and
+- a Simplified Chinese Markdown file.
+
+Conventions:
+- Naming: keep the English file as `name.md`, and the Chinese file as `name.zh-CN.md` in the same directory.
+- Cross-links: every English doc must include a link to its Chinese counterpart near the top:
+  - `[..., 简体中文](name.zh-CN.md)`
+  and every Chinese doc must include a link back to English:
+  - `[English](name.md)`
+- Keep section numbering/headings aligned where feasible so readers can follow both versions.
+
+Notes:
+- It’s OK to translate incrementally (start with a full but concise Chinese version); don’t leave a new doc without a Chinese counterpart.
+- Existing legacy docs may be English-only; when you substantially edit a legacy doc, consider adding its `*.zh-CN.md` partner and cross-links.
+
 ## Working conventions
 
 - Use syzbot/syzkaller bug pages as the source of truth for repro/config links; use lore only via stable thread endpoints/links on bug pages.
