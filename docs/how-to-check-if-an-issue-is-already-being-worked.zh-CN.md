@@ -1,3 +1,18 @@
+# How to check if a kernel issue is already being worked on（简体中文）
+
+[English](how-to-check-if-an-issue-is-already-being-worked.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- The key idea
+- Workflow we used (and why)
+- The scripts/commands we used (record)
+- What we found for issue #1 (example outcome)
+
+## English 原文
+
 # How to check if a kernel issue is already being worked on
 
 [简体中文](how-to-check-if-an-issue-is-already-being-worked.zh-CN.md)

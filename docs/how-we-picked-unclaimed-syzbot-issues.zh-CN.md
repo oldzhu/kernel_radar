@@ -1,3 +1,19 @@
+# How we listed “unclaimed” syzbot issues (no patch in flight)（简体中文）
+
+[English](how-we-picked-unclaimed-syzbot-issues.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- What “unclaimed” means (our heuristic)
+- Data sources
+- New script added
+- Relationship to existing scripts
+- Notes about speed/reliability
+
+## English 原文
+
 # How we listed “unclaimed” syzbot issues (no patch in flight)
 
 [简体中文](how-we-picked-unclaimed-syzbot-issues.zh-CN.md)

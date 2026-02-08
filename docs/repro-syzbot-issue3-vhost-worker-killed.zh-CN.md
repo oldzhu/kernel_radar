@@ -1,3 +1,30 @@
+# Repro setup: syzbot issue #3 (vhost_worker_killed hung task)（简体中文）
+
+[English](repro-syzbot-issue3-vhost-worker-killed.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Status (2026-01-12)
+- 0.1) What changed today (summary)
+- 2.2) Local kernel (A/B boot) + tracing knobs
+- 6) Known failure modes (what we’ve seen so far)
+- 0) Prereqs
+- 1) Prepare the bundle (download + unpack)
+- 2) Boot QEMU
+- 2.1) Manual runbook (host-side)
+- 3) Run the syzkaller repro inside the VM
+- 3) Run the syzkaller repro inside the VM
+- 3.2) Manual workflow (SSH + scp) — baseline reliable method
+- 3.1) Recommended “scp-free” workflow (use the shared folder)
+- 4) What to capture when it reproduces
+- 6) Known failure modes (what we’ve seen so far)
+- 5) Related thread review
+- Troubleshooting: very slow network
+
+## English 原文
+
 # Repro setup: syzbot issue #3 (vhost_worker_killed hung task)
 
 [简体中文](repro-syzbot-issue3-vhost-worker-killed.zh-CN.md)

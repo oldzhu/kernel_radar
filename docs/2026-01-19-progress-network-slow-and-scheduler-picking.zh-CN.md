@@ -1,3 +1,18 @@
+# 2026-01-19 — Progress note (network slow; scheduler picking)（简体中文）
+
+[English](2026-01-19-progress-network-slow-and-scheduler-picking.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- What we tried
+- Observations
+- Result
+- Next attempt (tomorrow)
+
+## English 原文
+
 # 2026-01-19 — Progress note (network slow; scheduler picking)
 
 [简体中文](2026-01-19-progress-network-slow-and-scheduler-picking.zh-CN.md)

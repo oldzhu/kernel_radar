@@ -1,3 +1,21 @@
+# Review notes: syzbot issue #3 (vhost_worker_killed hung task) thread（简体中文）
+
+[English](review-syzbot-issue3-vhost-worker-killed-thread.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Goal
+- How we extracted the thread reliably
+- What the thread is about (high level)
+- Message-by-message summary
+- Is it already being worked on?
+- Practical contribution ideas (low-risk)
+- Repro environment note
+
+## English 原文
+
 # Review notes: syzbot issue #3 (vhost_worker_killed hung task) thread
 
 [简体中文](review-syzbot-issue3-vhost-worker-killed-thread.zh-CN.md)

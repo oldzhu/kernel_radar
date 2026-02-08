@@ -1,3 +1,19 @@
+# 2026-01-24 — f8850bc3986562f79619 — monitoring + ReproC run（简体中文）
+
+[English](2026-01-24-f8850bc3986562f79619-monitoring-and-repro-run.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Goal
+- Setup / how it was run
+- Observation
+- Next
+- Additional reruns (same day)
+
+## English 原文
+
 # 2026-01-24 — f8850bc3986562f79619 — monitoring + ReproC run
 
 [简体中文](2026-01-24-f8850bc3986562f79619-monitoring-and-repro-run.zh-CN.md)

@@ -1,3 +1,17 @@
+# 2026-01-14 — Area-focused syzbot picking（简体中文）
+
+[English](2026-01-14-syzbot-picker-area-filters.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- What changed
+- Usage examples
+- Notes
+
+## English 原文
+
 # 2026-01-14 — Area-focused syzbot picking
 
 [简体中文](2026-01-14-syzbot-picker-area-filters.zh-CN.md)

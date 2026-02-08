@@ -1,3 +1,21 @@
+# 2026-01-13 — syzbot issue #3 repro progress (extid a9528028ab4ca83e8bac)（简体中文）
+
+[English](2026-01-13-issue3-repro-progress.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- What changed / key outcomes
+- Runner / scripts used today
+- Debug commands used today (triage)
+- Current state (end of day)
+- vhost_worker_killed lock-order: commit, local patch, and bundle proof
+- Late-session updates (auto-archive + higher concurrency)
+- Tomorrow (2026-01-14) — pick 3 new issues checklist
+
+## English 原文
+
 # 2026-01-13 — syzbot issue #3 repro progress (extid a9528028ab4ca83e8bac)
 
 [简体中文](2026-01-13-issue3-repro-progress.zh-CN.md)

@@ -1,3 +1,16 @@
+# 2026-01-20 — Shortlist (RCU stall / scheduler-adjacent)（简体中文）
+
+[English](2026-01-20-rcu-stall-shortlist.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Shortlist (3)
+- Next step (working issue)
+
+## English 原文
+
 # 2026-01-20 — Shortlist (RCU stall / scheduler-adjacent)
 
 [简体中文](2026-01-20-rcu-stall-shortlist.zh-CN.md)

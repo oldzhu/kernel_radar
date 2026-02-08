@@ -1,3 +1,21 @@
+# Tools index（简体中文）
+
+[English](tools-index.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Session checklist
+- Picking issues
+- Checking “in progress” / fixed
+- Summarizing bugs for tracking notes
+- Preparing repro
+- Lore thread followups
+- Notes
+
+## English 原文
+
 # Tools index
 
 [简体中文](tools-index.zh-CN.md)

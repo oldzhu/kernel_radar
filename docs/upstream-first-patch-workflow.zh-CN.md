@@ -1,3 +1,29 @@
+# Upstream Linux: first patch workflow (email-based)（简体中文）
+
+[English](upstream-first-patch-workflow.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Scope
+- Preconditions
+- 0) Clone upstream Linux
+- 1) Create a topic branch
+- 2) Make a tiny change
+- 3) Commit with kernel conventions
+- 4) Run checkpatch
+- 5) Determine recipients (maintainers + lists)
+- 6) Generate the patch file
+- 7) Install and configure git-send-email (host)
+- 8) Dry-run send (recommended)
+- 9) Send for real
+- 10) Confirm it appears on lore
+- 11) Handling review (v2 / threading)
+- Notes for future automation
+
+## English 原文
+
 # Upstream Linux: first patch workflow (email-based)
 
 [简体中文](upstream-first-patch-workflow.zh-CN.md)

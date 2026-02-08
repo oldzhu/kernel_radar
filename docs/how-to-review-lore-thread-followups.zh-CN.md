@@ -1,3 +1,18 @@
+# How to extract and review lore thread follow-ups (replies)（简体中文）
+
+[English](how-to-review-lore-thread-followups.md)
+
+> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+
+## 中文导读（章节列表）
+
+- Key lore endpoints you can use (most reliable)
+- Workflow we used
+- Saved reusable script
+- What we found (your patch thread)
+
+## English 原文
+
 # How to extract and review lore thread follow-ups (replies)
 
 [简体中文](how-to-review-lore-thread-followups.zh-CN.md)
