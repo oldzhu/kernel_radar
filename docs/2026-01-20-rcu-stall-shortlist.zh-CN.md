@@ -1,29 +1,16 @@
-# 2026-01-20 — Shortlist (RCU stall / scheduler-adjacent)（简体中文）
+# 2026-01-20 — 短名单（RCU stall / 调度相关）
 
 [English](2026-01-20-rcu-stall-shortlist.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+我们整理了 3 个 **最近报告** 的 syzbot 问题：它们都有 repro，并且按我们的启发式规则看起来 **无人认领**（关联的 lore `/T/` thread 标题不包含 `[PATCH`）。
 
-## 中文导读（章节列表）
-
-- Shortlist (3)
-- Next step (working issue)
-
-## English 原文
-
-# 2026-01-20 — Shortlist (RCU stall / scheduler-adjacent)
-
-[简体中文](2026-01-20-rcu-stall-shortlist.zh-CN.md)
-
-We shortlisted 3 **recently reported** syzbot issues that have a repro and appear **unclaimed** by our heuristic (no linked lore `/T/` thread subject containing `[PATCH`).
-
-This note can be regenerated/updated using:
+该记录可用如下命令重新生成/更新：
 
 ```bash
 ./tools/syzbot_bug_summary.py --markdown aa5520f7faf8d5438034 f8850bc3986562f79619 0604401cc084920f6c3d
 ```
 
-## Shortlist (3)
+## 短名单（3）
 
 ### 1) aa5520f7faf8d5438034
 
@@ -65,11 +52,11 @@ This note can be regenerated/updated using:
 - Status thread: https://groups.google.com/d/msgid/syzkaller-bugs/6966779c.050a0220.1a12f3.09f0.GAE@google.com
 - Lore thread: https://lore.kernel.org/all/6966779c.050a0220.1a12f3.09f0.GAE@google.com/T/
 
-## Next step (working issue)
+## 下一步（主攻问题）
 
-We will work on extid `f8850bc3986562f79619`.
+我们将主攻 extid `f8850bc3986562f79619`。
 
-Commands:
+命令：
 
 ```bash
 ./tools/syzbot_prepare_qemu_repro.py --extid f8850bc3986562f79619

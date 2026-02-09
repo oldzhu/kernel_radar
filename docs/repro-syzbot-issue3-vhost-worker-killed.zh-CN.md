@@ -1,99 +1,81 @@
-# Repro setup: syzbot issue #3 (vhost_worker_killed hung task)（简体中文）
+# Repro 设置：syzbot issue #3（vhost_worker_killed hung task）
 
 [English](repro-syzbot-issue3-vhost-worker-killed.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录一个端到端的“先用 syzbot 工件”复现流程：
 
-## 中文导读（章节列表）
-
-- Status (2026-01-12)
-- 0.1) What changed today (summary)
-- 2.2) Local kernel (A/B boot) + tracing knobs
-- 6) Known failure modes (what we’ve seen so far)
-- 0) Prereqs
-- 1) Prepare the bundle (download + unpack)
-- 2) Boot QEMU
-- 2.1) Manual runbook (host-side)
-- 3) Run the syzkaller repro inside the VM
-- 3) Run the syzkaller repro inside the VM
-- 3.2) Manual workflow (SSH + scp) — baseline reliable method
-- 3.1) Recommended “scp-free” workflow (use the shared folder)
-- 4) What to capture when it reproduces
-- 6) Known failure modes (what we’ve seen so far)
-- 5) Related thread review
-- Troubleshooting: very slow network
-
-## English 原文
-
-# Repro setup: syzbot issue #3 (vhost_worker_killed hung task)
-
-[简体中文](repro-syzbot-issue3-vhost-worker-killed.zh-CN.md)
-
-This doc records an end-to-end “use syzbot artifacts first” repro setup for:
 - extid: `a9528028ab4ca83e8bac`
-- bug page: https://syzkaller.appspot.com/bug?extid=a9528028ab4ca83e8bac
+- bug 页面: https://syzkaller.appspot.com/bug?extid=a9528028ab4ca83e8bac
 
-The point is to quickly get a reproducer running under QEMU so we can gather
-useful evidence (stacks, lock holders) before attempting a fix.
+目标是尽快在 QEMU 中跑起 reproducer，以便在尝试修复之前先收集有价值的证据（堆栈、锁持有者）。
 
-## Status (2026-01-12)
+## 状态（2026-01-12）
 
-Baseline repro (syzbot kernel) succeeded previously:
+此前已用 syzbot 内核成功复现：
+
 - `INFO: task vhost-... blocked for more than ... seconds`
-- stack including `vhost_worker_killed()`
-- escalated to `Kernel panic - not syncing: hung_task: blocked tasks`
+- 堆栈包含 `vhost_worker_killed()`
+- 最终升级为 `Kernel panic - not syncing: hung_task: blocked tasks`
 
-Today’s work focused on moving from “can repro once” to a repeatable *instrumented* workflow:
-- Added a local-kernel build pipeline (from `~/mylinux/linux`) that stages artifacts under `repro/<extid>/localimage/`.
-- Enabled lockdep + ftrace dump-on-oops and added targeted vhost lock tracing (in the kernel tree under `~/mylinux/linux`, not in this repo).
-- Reduced unrelated noise/crashes by disabling `CONFIG_NILFS2_FS` and `CONFIG_NETDEVSIM` in the local fragment.
+今日工作重心：从“能复现一次”推进到可重复的 **可插桩** 工作流：
 
-Current blocker seen with the local kernel:
-- VM hits `Oops: int3` in `kmem_cache_alloc_noprof()` and panics (SSH resets).
-- ftrace dumps show our `vhost_lock:` tracepoints firing, so the instrumentation is working.
-- The runner now attempts to disable panic-on-oops/panic-on-warn in the guest via sysctl before starting `syz-execprog`.
+- 新增本地内核构建流程（来自 `~/mylinux/linux`），产物放在 `repro/<extid>/localimage/`。
+- 启用 lockdep + ftrace dump-on-oops，并添加 vhost 锁的定点跟踪（在 `~/mylinux/linux` 的内核树中，不在本仓库）。
+- 在本地 fragment 中禁用 `CONFIG_NILFS2_FS` 和 `CONFIG_NETDEVSIM` 以减少无关噪音/崩溃。
 
-For that run, the bundle directory contains timestamped archives like:
+当前本地内核的阻塞点：
+
+- VM 在 `kmem_cache_alloc_noprof()` 里触发 `Oops: int3` 并 panic（SSH 重置）。
+- ftrace dump 里能看到 `vhost_lock:` tracepoints，说明插桩生效。
+- runner 现在会在启动 `syz-execprog` 前，通过 sysctl 关闭 panic-on-oops/panic-on-warn。
+
+该次运行的 bundle 目录中有时间戳归档，例如：
+
 - `qemu-serial.panic.<timestamp>.log`
 - `watch_patterns.panic.<timestamp>.log`
-- `execprog_stream.tail.<timestamp>.log` (small tail; safe to share)
+- `execprog_stream.tail.<timestamp>.log`（小尾部；可安全分享）
 
-## 0.1) What changed today (summary)
+## 0.1) 今日变更（摘要）
 
-New/updated helper scripts in this repo:
-- `tools/build_issue3_local_kernel.sh`: builds a local kernel from `~/mylinux/linux` using `kernel.config` + a fragment, stages to `repro/<extid>/localimage/`.
-- `tools/run_issue3_manual.sh`: supports A/B kernel selection and extra tracing knobs; also sets guest sysctls to reduce “oops → immediate panic”.
+仓库内新增/更新脚本：
 
-Local (non-repo) kernel tree changes:
-- We added targeted `trace_printk()` in vhost paths under `~/mylinux/linux/drivers/vhost/vhost.c`.
-- These changes are not committed here (this repo intentionally only carries automation + docs).
+- `tools/build_issue3_local_kernel.sh`：从 `~/mylinux/linux` 构建本地内核，使用 `kernel.config` + fragment，产物放到 `repro/<extid>/localimage/`。
+- `tools/run_issue3_manual.sh`：支持 A/B 内核选择和额外跟踪参数；同时设置 guest sysctl 以降低 “oops → 立即 panic”。
 
-## 2.2) Local kernel (A/B boot) + tracing knobs
+本地内核树（非仓库）改动：
 
-We keep the original syzbot bundle intact and place local artifacts under:
+- 在 `~/mylinux/linux/drivers/vhost/vhost.c` 中添加了定点 `trace_printk()`。
+- 这些改动不会提交到此仓库（该仓库只保留自动化工具和文档）。
+
+## 2.2) 本地内核（A/B 启动）+ 跟踪开关
+
+我们保持原始 syzbot bundle 不变，本地产物放在：
+
 - `repro/a9528028ab4ca83e8bac/localimage/`
 
-### Build the local kernel
+### 构建本地内核
 
-From the repo root:
+在仓库根目录执行：
 
 ```bash
 tools/build_issue3_local_kernel.sh
 ```
 
-This uses:
+使用：
+
 - base: `repro/a9528028ab4ca83e8bac/kernel.config`
 - fragment: `repro/a9528028ab4ca83e8bac/localimage/lockdep-trace-nonilfs.config`
-- kernel tree: `~/mylinux/linux`
+- 内核树: `~/mylinux/linux`
 
-Artifacts staged into `repro/a9528028ab4ca83e8bac/localimage/`:
-- `bzImage` (for QEMU)
-- `vmlinux` (for symbolization)
-- `System.map`, `config` (debugging reference)
+产物输出到 `repro/a9528028ab4ca83e8bac/localimage/`：
 
-### Boot the local kernel + run the workload
+- `bzImage`（QEMU 用）
+- `vmlinux`（符号化用）
+- `System.map`、`config`（调试参考）
 
-Example (more aggressive workload + larger ftrace buffer):
+### 启动本地内核并运行负载
+
+示例（更激进负载 + 更大 ftrace buffer）：
 
 ```bash
 USE_LOCALIMAGE=1 \
@@ -106,148 +88,157 @@ CAPTURE_EXECPROG=1 \
 tools/run_issue3_manual.sh
 ```
 
-Notes:
-- `panic_on_oops=0` is *not* a supported kernel cmdline parameter; the kernel will print it as unknown.
-- To avoid “oops → immediate panic”, the runner now tries:
-  - `sysctl -w kernel.panic_on_oops=0` and `kernel.panic_on_warn=0`
-  - and (fallback) writing `/proc/sys/kernel/panic_on_oops` / `/proc/sys/kernel/panic_on_warn`
+注意：
 
-## 6) Known failure modes (what we’ve seen so far)
+- `panic_on_oops=0` **不是** 支持的内核 cmdline 参数；内核会打印 unknown。
+- 为避免 “oops → 立即 panic”，runner 现在会尝试：
+  - `sysctl -w kernel.panic_on_oops=0` 和 `kernel.panic_on_warn=0`
+  - 以及（fallback）写入 `/proc/sys/kernel/panic_on_oops` / `/proc/sys/kernel/panic_on_warn`
 
-## 0) Prereqs
+## 6) 已知失败模式（目前观察到的）
 
-- QEMU (host): `qemu-system-x86_64`
-  - Debian/Ubuntu: `sudo apt-get update && sudo apt-get install -y qemu-system-x86`
+## 0) 前置条件
 
-This repo tool does **not** install QEMU for you.
+- QEMU（host）：`qemu-system-x86_64`
+  - Debian/Ubuntu：`sudo apt-get update && sudo apt-get install -y qemu-system-x86`
 
-## 1) Prepare the bundle (download + unpack)
+该仓库工具 **不会** 自动安装 QEMU。
 
-From the `kernel_radar` repo root:
+## 1) 准备 bundle（下载 + 解包）
+
+在 `kernel_radar` 仓库根目录执行：
 
 - `./tools/syzbot_prepare_qemu_repro.py --extid a9528028ab4ca83e8bac`
 
-This creates a local directory:
+会创建目录：
+
 - `repro/a9528028ab4ca83e8bac/`
 
-…and writes:
+并写入：
+
 - `bzImage` / `bzImage.xz`
 - `disk.raw` / `disk.raw.xz`
-- `vmlinux` / `vmlinux.xz` (if present on the bug page)
-- `kernel.config` (KernelConfig)
-- `repro.syz` (ReproSyz)
-- `crash.log`, `repro.log`, `crash.report` (if present)
+- `vmlinux` / `vmlinux.xz`（若 bug 页面提供）
+- `kernel.config`（KernelConfig）
+- `repro.syz`（ReproSyz）
+- `crash.log`、`repro.log`、`crash.report`（若存在）
 - `run_qemu.sh`
 
-The `repro/` directory is ignored by git so you don’t accidentally commit large binaries.
+`repro/` 目录被 git 忽略，避免误提交大文件。
 
-### How the tool works (for later reference)
+### 工具工作原理（便于后续参考）
 
-The helper script is:
+辅助脚本：
+
 - [tools/syzbot_prepare_qemu_repro.py](../tools/syzbot_prepare_qemu_repro.py)
 
-Internally it:
-1) Fetches the syzbot bug HTML page.
-2) Scrapes attachment links like `/text?tag=KernelConfig` and `/text?tag=ReproSyz`.
-3) Scrapes large artifact links hosted under `https://storage.googleapis.com/syzbot-assets/` (disk + kernel image).
-4) Streams downloads to disk using `*.part` temporary files then renames.
-5) Decompresses `*.xz` into the exact filenames expected by the generated QEMU runner (`bzImage`, `disk.raw`).
-6) Writes `run_qemu.sh` as a minimal boot helper (and refuses to run if `qemu-system-x86_64` is missing).
+内部流程：
 
-Safety behaviors:
-- It will not overwrite existing files unless you pass `--force`.
-- If you only want to refresh `run_qemu.sh` (for example after we tweak QEMU args in the generator), use `--regen-runner` to avoid any downloads/decompression.
-- It keeps the original `*.xz` files so you can re-decompress without re-downloading.
+1) 抓取 syzbot bug HTML 页面。
+2) 解析附件链接，如 `/text?tag=KernelConfig`、`/text?tag=ReproSyz`。
+3) 解析 `https://storage.googleapis.com/syzbot-assets/` 下的大工件链接（disk + kernel image）。
+4) 使用 `*.part` 临时文件流式下载后再 rename。
+5) 解压 `*.xz` 到生成的 QEMU runner 期望的文件名（`bzImage`、`disk.raw`）。
+6) 写出最小化 `run_qemu.sh`（并在缺少 `qemu-system-x86_64` 时拒绝运行）。
 
-Runner-only update example:
+安全行为：
+
+- 不会覆盖已有文件，除非传入 `--force`。
+- 如只想刷新 `run_qemu.sh`（例如我们调整了 QEMU 参数），可用 `--regen-runner` 避免下载/解压。
+- 保留原始 `*.xz`，便于无需重新下载即可再解压。
+
+仅更新 runner 示例：
 
 ```bash
 ./tools/syzbot_prepare_qemu_repro.py --extid a9528028ab4ca83e8bac --regen-runner
 ```
 
-## 2) Boot QEMU
+## 2) 启动 QEMU
 
 - `cd repro/a9528028ab4ca83e8bac`
 - `./run_qemu.sh`
 
-Notes:
-- The script uses `-snapshot` by default (disk changes are not persisted).
-  - To persist: `PERSIST=1 ./run_qemu.sh`
-- You can change VM resources:
+说明：
+
+- 默认使用 `-snapshot`（磁盘改动不持久化）。
+  - 若需持久化：`PERSIST=1 ./run_qemu.sh`
+- 可调整 VM 资源：
   - `MEM=4096 SMP=4 ./run_qemu.sh`
 
-### Optional: run QEMU in the background (keep your terminal)
+### 可选：后台运行 QEMU（保留终端）
 
-By default the VM runs in the foreground and takes over your terminal.
+默认 VM 在前台运行并占用终端。
 
-If you want the VM detached (so you can run `ssh`/`scp` from the same shell), use:
+若希望 VM 脱离运行（便于同一终端执行 `ssh`/`scp`），使用：
+
 - `DAEMONIZE=1 ./run_qemu.sh`
 
-Note: daemonized mode is fully headless (no `-nographic`); console output is written to `qemu-serial.log`.
+说明：后台模式为纯 headless（无 `-nographic`）；控制台输出写入 `qemu-serial.log`。
 
-It will write:
-- `qemu-serial.log` (serial console output)
-- `qemu.pid` (QEMU PID)
+会写入：
 
-### Optional: host↔guest shared folder (9p)
+- `qemu-serial.log`（串口输出）
+- `qemu.pid`（QEMU PID）
 
-If you want a simple file transfer path without relying on SSH/scp, you can pass a host directory
-to the VM via 9p:
+### 可选：host↔guest 共享目录（9p）
+
+如果想不依赖 SSH/scp 简化文件传输，可通过 9p 把 host 目录映射进 VM：
 
 - `SHARE_DIR=$PWD SHARE_MOUNT=/mnt/host ./run_qemu.sh`
 
-Then inside the guest:
+在 guest 内执行：
 
 - `mkdir -p /mnt/host`
 - `mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host`
 
-After that, files you put in `$PWD` on the host will appear under `/mnt/host` in the VM.
+之后 host 的 `$PWD` 会出现在 VM 的 `/mnt/host`。
 
-### If you hit “Unable to mount root fs”
+### 如果出现 “Unable to mount root fs”
 
-syzbot disk images are typically partitioned. If you see a panic like:
-`VFS: Unable to mount root fs`, it usually means the kernel cmdline root device
-is wrong.
+syzbot 的磁盘镜像通常有分区。若看到类似：
+`VFS: Unable to mount root fs`，通常是 cmdline 的 root 设备不对。
 
-This repo’s generator sets:
+本仓库生成器设置为：
+
 - `root=/dev/vda1 rootwait rw`
 
-If you’ve edited an older `run_qemu.sh`, ensure it uses `/dev/vda1` (not `/dev/vda`).
+若你修改过旧版本 `run_qemu.sh`，请确认使用 `/dev/vda1`（不是 `/dev/vda`）。
 
-## 2.1) Manual runbook (host-side)
+## 2.1) 手动运行清单（host 侧）
 
-This section is a copy/paste-friendly “manual ops” checklist for running the repro repeatedly.
+本节为可直接复制的“手工流程”清单，便于反复跑 repro。
 
-Optional helper script (runs these same steps, but keeps everything transparent):
+可选 helper 脚本（执行同样步骤，但保持透明）：
 
 - `tools/run_issue3_manual.sh`
 
-From the repo root:
+在仓库根目录运行：
 
 ```bash
 tools/run_issue3_manual.sh
 ```
 
-To check/stop later:
+后续检查/停止：
 
 ```bash
 tools/run_issue3_manual.sh --status
 tools/run_issue3_manual.sh --stop
 ```
 
-Optional: capture the guest `execprog.out` to the host (bounded size by default):
+可选：将 guest 的 `execprog.out` 拉回 host（默认限制大小）：
 
 ```bash
 CAPTURE_EXECPROG=1 tools/run_issue3_manual.sh
 ```
 
-Knobs:
-- `EXECPROG_STREAM_MAX_BYTES` (default: 5MiB; set `0` to disable trimming)
-- `EXECPROG_STREAM_TRIM_SECS` (default: 5)
+参数：
 
-### A) Clean stop + restart QEMU (daemon mode recommended)
+- `EXECPROG_STREAM_MAX_BYTES`（默认 5MiB；设为 `0` 关闭裁剪）
+- `EXECPROG_STREAM_TRIM_SECS`（默认 5）
 
-From the bundle directory:
+### A) 干净停止 + 重启 QEMU（建议 daemon 模式）
+
+在 bundle 目录：
 
 ```bash
 cd repro/a9528028ab4ca83e8bac
@@ -265,13 +256,14 @@ rm -f qemu.pid qemu-serial.log
 DAEMONIZE=1 ./run_qemu.sh
 ```
 
-What you should see:
-- `qemu.pid` appears (PID of qemu)
-- `qemu-serial.log` grows over time
+你应看到：
 
-### B) Watch for the target signature in the serial log
+- 出现 `qemu.pid`（qemu 的 PID）
+- `qemu-serial.log` 持续增长
 
-Run one of these on the host:
+### B) 在串口日志中监控目标特征
+
+在 host 上执行以下任一命令：
 
 ```bash
 cd repro/a9528028ab4ca83e8bac
@@ -286,9 +278,9 @@ rm -f watch_patterns.log
   tee -a watch_patterns.log)
 ```
 
-### C) Verify the forwarded SSH port is up (don’t let commands hang)
+### C) 验证 SSH 端口转发可用（避免命令卡死）
 
-We forward host `127.0.0.1:10022` → guest `:22`.
+host `127.0.0.1:10022` → guest `:22` 的转发已经设置。
 
 ```bash
 cd repro/a9528028ab4ca83e8bac
@@ -303,47 +295,44 @@ timeout 8s ssh -o BatchMode=yes \
   && echo SSH_OK || echo SSH_FAIL
 ```
 
-If `SSH_FAIL` but `qemu-serial.log` is still growing, treat the VM as alive and switch to serial-log-driven monitoring.
+若显示 `SSH_FAIL` 但 `qemu-serial.log` 仍在增长，可视为 VM 存活，改用串口日志驱动的监控。
 
-## 3) Run the syzkaller repro inside the VM
+## 3) 在 VM 内运行 syzkaller repro
 
-## 3) Run the syzkaller repro inside the VM
+重要：`repro.syz` 是 **syz program**（不是 shell 脚本）。运行它需要：
 
-Important: `repro.syz` is a **syz program** (not a shell script). To run it you
-need either:
-- a C reproducer (`ReproC`) that you can compile/run directly, or
-- syzkaller runner binaries: `syz-execprog` + `syz-executor`.
+- 可直接编译/运行的 C reproducer（`ReproC`），或
+- syzkaller 运行器二进制：`syz-execprog` + `syz-executor`。
 
-Some syzbot images include `syz-execprog`/`syz-executor`, but some do not.
+部分 syzbot 镜像内含 `syz-execprog`/`syz-executor`，但也有不包含的情况。
 
-Typical workflow after you get a root shell:
+典型流程（拿到 root shell 后）：
 
-- Find the binaries:
+- 查找二进制：
   - `ls / | grep syz`
   - `find / -maxdepth 2 -name 'syz-execprog' -o -name 'syz-executor' 2>/dev/null`
 
-- Run the reproducer:
+- 运行 reproducer：
   - `syz-execprog -executor=syz-executor -procs=1 -repeat=0 repro.syz`
 
-If the binaries are under `/`, try:
+若二进制在 `/` 下，可尝试：
+
 - `/syz-execprog -executor=/syz-executor -procs=1 -repeat=0 repro.syz`
 
-### If the VM does not contain `syz-execprog` / `syz-executor`
+### 若 VM 中没有 `syz-execprog` / `syz-executor`
 
-You will need to install/build syzkaller on the host, then copy/share the two
-binaries into the VM. Easiest approaches:
+需要在 host 安装/构建 syzkaller，并将两个二进制复制/共享到 VM。最简单的方案：
 
-- **Host→guest file transfer** (e.g. QEMU 9p shared folder, or scp once SSH works)
-- **Build inside the VM** (slower; needs Go toolchain)
+- **host→guest 传输**（QEMU 9p 共享目录，或 SSH 可用时 scp）
+- **在 VM 内构建**（更慢，需要 Go 工具链）
 
-Once you have the two binaries inside the VM, re-run the command above.
+将二进制放入 VM 后，再运行上面的命令。
 
-## 3.2) Manual workflow (SSH + scp) — baseline reliable method
+## 3.2) 手动流程（SSH + scp）— 最可靠的基线方式
 
-We found this to be the most reliable way to get started. SSH may become unstable *after* `syz-execprog`
-runs for a while, so the trick is to keep SSH sessions short and background the workload.
+我们发现这是最稳定的入门方式。SSH 通常在 `syz-execprog` 运行一段时间后变得不稳定，因此关键是 **缩短 SSH 会话** 并将负载后台化。
 
-### On the host
+### 在 host 上
 
 ```bash
 cd repro/a9528028ab4ca83e8bac
@@ -376,34 +365,36 @@ timeout 8s ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o Co
   -p 10022 root@127.0.0.1 'tail -n 20 /root/repro/execprog.out' || true
 ```
 
-If SSH starts failing with `Connection timed out during banner exchange`, rely on `qemu-serial.log` + the watcher (section 2.1B).
+如果 SSH 开始报 `Connection timed out during banner exchange`，请改用 `qemu-serial.log` + watcher（见 2.1B）。
 
-## 3.1) Recommended “scp-free” workflow (use the shared folder)
+## 3.1) 推荐的“无 scp”流程（使用共享目录）
 
-This is the quickest way to run `repro.syz` without depending on guest SSH.
+这是不依赖 guest SSH 的最快方式。
 
-### On the host
+### 在 host 上
 
-1) Ensure you have the built runner binaries on the host:
+1) 确保 host 上已有构建好的 runner 二进制：
+
 - `~/mylinux/syzkaller/bin/linux_amd64/syz-execprog`
 - `~/mylinux/syzkaller/bin/linux_amd64/syz-executor`
 
-2) Boot the VM with a 9p shared folder that points at `~/mylinux`:
+2) 使用 9p 共享目录启动 VM，指向 `~/mylinux`：
 
 - `cd repro/a9528028ab4ca83e8bac`
 - `SHARE_DIR=/home/oldzhu/mylinux SHARE_MOUNT=/mnt/host ./run_qemu.sh`
 
-Tip: add `DAEMONIZE=1` if you want QEMU detached:
+提示：若需后台运行：
+
 - `SHARE_DIR=/home/oldzhu/mylinux SHARE_MOUNT=/mnt/host DAEMONIZE=1 ./run_qemu.sh`
 
-### In the guest
+### 在 guest 内
 
-1) Mount the shared folder:
+1) 挂载共享目录：
 
 - `mkdir -p /mnt/host`
 - `mount -t 9p -o trans=virtio,version=9p2000.L hostshare /mnt/host`
 
-2) Copy the binaries and reproducer into a writable guest directory:
+2) 将二进制与 reproducer 拷贝到 guest 可写目录：
 
 - `mkdir -p /root/repro`
 - `cp /mnt/host/syzkaller/bin/linux_amd64/syz-execprog /root/repro/`
@@ -411,73 +402,78 @@ Tip: add `DAEMONIZE=1` if you want QEMU detached:
 - `cp /mnt/host/kernel_radar/repro/a9528028ab4ca83e8bac/repro.syz /root/repro/`
 - `chmod +x /root/repro/syz-execprog /root/repro/syz-executor`
 
-3) Run the reproducer:
+3) 运行 reproducer：
 
 - `cd /root/repro`
 - `dmesg -wT &`
 - `./syz-execprog -executor=./syz-executor -sandbox=none -procs=6 -threaded=1 -repeat=0 repro.syz`
 
-If it hangs as expected, capture a task dump too:
+若按预期卡住，记得抓取任务转储：
+
 - `echo t > /proc/sysrq-trigger`
 
-### What “reproduced” looks like
+### “复现成功”的表现
 
-For this issue, reproduction usually manifests as a hang/hung task involving vhost,
-e.g. messages like:
+该问题通常表现为与 vhost 相关的 hang/hung task，例如：
+
 - `INFO: task ... blocked for more than ... seconds`
 - `hung_task: blocked tasks`
-- call traces mentioning `vhost*` (including the vhost worker path)
+- 堆栈中出现 `vhost*`（包含 vhost worker 路径）
 
-## 4) What to capture when it reproduces
+## 4) 复现时需要捕获什么
 
-For this issue, the goal is to capture evidence around the hung task / mutex
-ownership. Useful data to post back to the thread includes:
+该问题重点是收集 hung task / mutex 持有信息，建议回帖的数据包括：
 
-- full console output up to the hang
-- `sysrq` task dumps (if enabled): `echo t > /proc/sysrq-trigger`
-- `dmesg` output from the VM
+- hang 之前的完整控制台输出
+- `sysrq` 任务转储（若启用）：`echo t > /proc/sysrq-trigger`
+- VM 中的 `dmesg` 输出
 
-## 6) Known failure modes (what we’ve seen so far)
+## 6) 已知失败模式（目前观察到的）
 
-### A) SSH becomes unusable mid-run while serial output continues
+### A) 运行中 SSH 失效，但串口仍有输出
 
-Symptom (host-side):
+症状（host 侧）：
+
 - `Connection timed out during banner exchange`
 
-What to do:
-- Stop relying on SSH, and instead:
-  - use `qemu-serial.log` + `watch_patterns.log` to detect the hung-task signature
-  - keep checking whether `qemu-serial.log` is still growing (`wc -l qemu-serial.log`, `tail -n 50 qemu-serial.log`)
+处理建议：
 
-### B) Early KASAN Oops/panic when 9p sharing is enabled
+- 不再依赖 SSH，改为：
+  - 使用 `qemu-serial.log` + `watch_patterns.log` 检测 hung-task 特征
+  - 继续检查 `qemu-serial.log` 是否增长（`wc -l qemu-serial.log`、`tail -n 50 qemu-serial.log`）
 
-In some runs with `SHARE_DIR=...` (virtio-9p), we observed an early KASAN Oops/panic during/soon after userspace.
+### B) 启用 9p 共享时出现早期 KASAN Oops/panic
 
-Practical advice:
-- If your goal is reproducing the hung-task, prefer the SSH+scp workflow first.
-- Use 9p only if you specifically want scp-free staging, and be aware it may change timing/behavior.
+在 `SHARE_DIR=...`（virtio-9p）时，部分运行在 userspace 期间/之后出现早期 KASAN Oops/panic。
 
-### C) Local kernel: `Oops: int3` then panic (SSH reset)
+建议：
 
-Symptom:
-- `Oops: int3` with RIP in `kmem_cache_alloc_noprof()`
-- followed by `Kernel panic - not syncing: Fatal exception in interrupt`
+- 若目标是复现 hung-task，优先使用 SSH+scp 流程。
+- 仅在需要“无 scp”时使用 9p，并注意它可能改变时序/行为。
 
-Notes:
-- This is a separate crash signature from the original vhost hung-task; it can block reaching the target.
-- ftrace dumps still include our `vhost_lock:` traces, so vhost code paths are exercised.
-- Mitigation attempt: disable panic-on-oops/panic-on-warn via sysctl (now automated in `tools/run_issue3_manual.sh`).
+### C) 本地内核：`Oops: int3` 随后 panic（SSH 重置）
 
+症状：
 
-## 5) Related thread review
+- `Oops: int3`，RIP 位于 `kmem_cache_alloc_noprof()`
+- 随后 `Kernel panic - not syncing: Fatal exception in interrupt`
 
-See the earlier mail-thread summary:
+说明：
+
+- 这是与 vhost hung-task 不同的崩溃特征，可能阻碍达到目标。
+- ftrace dump 仍能看到 `vhost_lock:` 跟踪，说明 vhost 路径被走到。
+- 缓解尝试：通过 sysctl 关闭 panic-on-oops/panic-on-warn（已在 `tools/run_issue3_manual.sh` 自动执行）。
+
+## 5) 相关线程回顾
+
+参见此前邮件线程摘要：
+
 - `docs/review-syzbot-issue3-vhost-worker-killed-thread.md`
 
+## 故障排查：网络极慢
 
-## Troubleshooting: very slow network
+如果下载很慢/不稳定，可考虑：
 
-If downloads are slow/unreliable, you can:
-- Run the tool once and let it partially download (it writes `*.part` files), then rerun with the same command.
-- Prefer doing the big downloads later; the script still writes `meta.txt` first so you keep the exact URLs.
-- Use `--force` only if you want to discard partial/cached files.
+- 先运行一次让其部分下载（写 `*.part`），随后用同样命令继续。
+- 大文件可晚点下载；脚本会先写 `meta.txt` 以保留精确 URL。
+- 仅在想丢弃 partial/cached 文件时使用 `--force`。

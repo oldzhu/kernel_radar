@@ -1,79 +1,65 @@
-# How we picked the “top 3” starter kernel issues (syzbot)（简体中文）
+# 我们如何挑选 “top 3” 入门级内核问题（syzbot）
 
 [English](how-we-picked-top-3-syzbot-issues.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录我们如何为“第一次真实修复补丁”练习，挑选 3 个真实的内核问题。
 
-## 中文导读（章节列表）
+**目标约束**（我们优化的方向）：
 
-- Data sources used
-- Selection approach (high level)
-- Scripts used (with explanation)
-- The 3 selected issues (snapshot)
-- Notes / limitations
+- **真实 upstream 问题**（面向主线，不是私有问题）。
+- **可复现**：最好有 **C reproducer**，否则是 syz repro。
+- **不需要特殊硬件**（应可在 QEMU/VM 中跑）。
+- **不太复杂**（定位清晰、warning/OOB 等局部问题、影响面小）。
 
-## English 原文
+我们以 **syzbot/syzkaller upstream bug 列表** 为主要数据源，因为它提供：
 
-# How we picked the “top 3” starter kernel issues (syzbot)
-
-[简体中文](how-we-picked-top-3-syzbot-issues.zh-CN.md)
-
-This doc records exactly how we selected 3 real kernel issues for a “first real bugfix patch” round.
-
-**Goal constraints** (what we optimized for)
-- **Real upstream issues** (mainline-facing, not private).
-- **Reproducible**: ideally a **C reproducer**, otherwise a syz repro.
-- **No special hardware** (should run in QEMU/VM).
-- **Not too complex** (localized warning/OOB, clear file/line, smaller blast radius).
-
-We used **syzbot/syzkaller upstream bug list** as the primary source because it provides:
-- a public bug tracker page per issue
-- attachments for reproducers (`ReproC`, `ReproSyz`)
-- a syzbot-tested kernel config (`KernelConfig`)
+- 每个问题的公开追踪页面
+- repro 附件（`ReproC`、`ReproSyz`）
+- syzbot 测试过的内核配置（`KernelConfig`）
 
 
-## Data sources used
+## 使用的数据来源
 
-### 1) syzbot upstream list (JSON)
+### 1) syzbot upstream 列表（JSON）
 - URL: https://syzkaller.appspot.com/upstream?json=1
-- Schema note: this endpoint is intentionally minimal; each entry is mostly:
+- Schema 说明：该接口刻意精简；每条记录基本只有：
   - `title`
-  - `link` (usually relative, like `/bug?extid=...`)
+  - `link`（通常是相对路径，如 `/bug?extid=...`）
 
-So the JSON alone is **not enough** to know whether a bug has a reproducer.
+因此仅靠 JSON **无法** 判断是否有 reproducer。
 
-### 2) Bug detail page (HTML)
-- Example: https://syzkaller.appspot.com/bug?extid=3e68572cf2286ce5ebe9
-- The HTML page includes links to attachments like:
+### 2) Bug 详情页（HTML）
+- 例子：https://syzkaller.appspot.com/bug?extid=3e68572cf2286ce5ebe9
+- HTML 页面包含附件链接，如：
   - `/text?tag=ReproC&x=...`
   - `/text?tag=ReproSyz&x=...`
   - `/text?tag=KernelConfig&x=...`
   - `/text?tag=CrashReport&x=...`
 
-We scraped those links to decide if a bug is reproducible and “starter-friendly”.
+我们抓取这些链接来判断一个问题是否可复现、是否“适合入门”。
 
-### 3) lore.kernel.org `syzbot` list (initial exploration)
-We also explored lore feeds to see if recent syzbot bug mail could be mined directly:
+### 3) lore.kernel.org `syzbot` 列表（早期探索）
+我们也尝试过 lore 的 feed，看是否能直接从近期 syzbot 邮件中挖掘问题：
 - Atom: https://lore.kernel.org/syzbot/new.atom
 
-However, in the slice we looked at, a lot of entries were **CI/moderation** and some “Email from syzbot” threads were essentially empty bodies when retrieved as mbox. That’s why we pivoted to scraping syzkaller bug pages instead.
+但在我们查看的样本里，很多条目是 **CI/审核** 类邮件；部分 “Email from syzbot” 线程在 mbox 中几乎是空内容。因此我们转而抓取 syzkaller bug 页面作为权威来源。
 
 
-## Selection approach (high level)
+## 选择方法（高层）
 
-1. Pull upstream bug list JSON from syzkaller.
-2. For each bug, open its bug page.
-3. **Keep** it only if it has a **ReproC** or **ReproSyz** attachment link.
-4. Apply a simple “no special hardware” heuristic by excluding titles mentioning common hardware drivers.
-5. Stop once we have 3 candidates.
+1. 从 syzkaller 拉取 upstream bug 列表 JSON。
+2. 逐个打开 bug 页面。
+3. 仅 **保留** 含有 **ReproC** 或 **ReproSyz** 附件链接的问题。
+4. 用简单的“无需特殊硬件”规则过滤：排除标题中提到常见硬件驱动的条目。
+5. 收集到 3 个候选后停止。
 
-This yields a shortlist suitable for the next phase: reproduce → minimize → patch → send to upstream.
+这样可以得到一个适合后续阶段的 shortlist：复现 → 最小化 → 修补 → 发送上游。
 
 
-## Scripts used (with explanation)
+## 使用的脚本（含说明）
 
-### A) Quick look at lore’s `syzbot` Atom feed
-Purpose: sanity-check whether lore `syzbot` feed contains actual bug threads.
+### A) 快速查看 lore 的 `syzbot` Atom feed
+目的：验证 lore `syzbot` feed 是否包含可用的 bug 线程。
 
 ```bash
 python3 - <<'PY'
@@ -111,17 +97,18 @@ print('printed', count)
 PY
 ```
 
-Outcome: mostly CI/moderation-type threads in the sample; not a straightforward bug shortlist.
+结论：样本中多数是 CI/审核类线程，不适合作为直接 shortlist 来源。
 
 
-### B) Lore raw message probing
-Purpose: confirm which “raw” URLs return RFC822/mbox vs HTML.
+### B) Lore 原始消息探测
+目的：确认哪些 “raw” URL 返回 RFC822/mbox，哪些返回 HTML。
 
-Key finding for lore:
-- `.../raw` returns mbox-like content
-- `...?raw=1` returns HTML (not the raw message)
+关键发现：
 
-Example probe:
+- `.../raw` 返回 mbox 类内容
+- `...?raw=1` 返回 HTML（不是原始消息）
+
+示例探测：
 
 ```bash
 python3 - <<'PY'
@@ -138,21 +125,22 @@ for suffix in ['raw','?raw=1','?x=raw','?format=raw','?x=mbox']:
 PY
 ```
 
-This investigation led us to prefer **syzkaller bug pages** as the canonical source for repro/config.
+这项调查让我们更倾向于把 **syzkaller bug 页面** 作为 repro/config 的权威来源。
 
 
-### C) The actual “pick top 3” script (re-runnable)
-We turned the final selection logic into a small script you can rerun later:
+### C) 实际的 “pick top 3” 脚本（可重复运行）
+我们把最终筛选逻辑整理成一个小脚本，便于以后复用：
 
 - Script: [tools/syzbot_pick_top3.py](../tools/syzbot_pick_top3.py)
 
-What it does:
-- fetches https://syzkaller.appspot.com/upstream?json=1
-- walks bugs until it finds `ReproC`/`ReproSyz` links
-- filters out obvious hardware-ish titles (USB/WiFi/BT/DRM/etc.)
-- prints a shortlist with bug URL, status/subsystems, and attachment links
+它的行为：
 
-Run it from the repo root:
+- 拉取 https://syzkaller.appspot.com/upstream?json=1
+- 遍历 bug，直到找到 `ReproC`/`ReproSyz` 链接
+- 过滤明显偏硬件的标题（USB/WiFi/BT/DRM 等）
+- 输出包含 bug URL、status/subsystems 和附件链接的 shortlist
+
+在仓库根目录运行：
 
 ```bash
 ./tools/syzbot_pick_top3.py
@@ -160,27 +148,27 @@ Run it from the repo root:
 ./tools/syzbot_pick_top3.py --scan-limit 800 --count 3
 ```
 
-Targeting specific areas (cgroup/namespaces/scheduler/GPU):
+定向筛选特定领域（cgroup/namespaces/scheduler/GPU）：
 
 ```bash
-# Filter by syzbot subsystem labels (best when they match what you want):
+# 按 syzbot subsystem 标签过滤（当标签与目标匹配时效果最好）：
 ./tools/syzbot_pick_top3.py --count 3 --include-subsystem cgroup
 ./tools/syzbot_pick_top3.py --count 3 --include-subsystem namespaces
 ./tools/syzbot_pick_top3.py --count 3 --include-subsystem scheduler
 
-# Or filter by title keyword regex:
+# 或按标题关键词正则过滤：
 ./tools/syzbot_pick_top3.py --count 3 --include-title-re 'cgroup|memcg'
 ./tools/syzbot_pick_top3.py --count 3 --include-title-re 'namespace|setns|unshare|nsfs'
 ./tools/syzbot_pick_top3.py --count 3 --include-title-re 'sched|scheduler|cfs|rtmutex'
 
-# GPU/DRM note: the default title exclusion includes drm/amdgpu/nouveau.
-# If you intentionally want GPU bugs, disable the default exclude filter:
+# GPU/DRM 说明：默认标题排除包含 drm/amdgpu/nouveau。
+# 如果明确要 GPU 问题，请关闭默认排除：
 ./tools/syzbot_pick_top3.py --count 3 --no-exclude-title --include-title-re 'drm|amdgpu|nouveau'
 ```
 
 
-### D) Preview a C reproducer quickly
-Purpose: confirm a repro doesn’t require special hardware and is “normal syscalls”.
+### D) 快速预览 C reproducer
+目的：确认 repro 不需要特殊硬件，且是“正常的系统调用”。
 
 ```bash
 python3 - <<'PY'
@@ -194,9 +182,9 @@ PY
 ```
 
 
-## The 3 selected issues (snapshot)
+## 选出的 3 个问题（快照）
 
-This was the shortlist at the time of selection (2026-01-06):
+这是当时（2026-01-06）的 shortlist：
 
 1) WARNING in `skb_attempt_defer_free` (net)
 - Bug: https://syzkaller.appspot.com/bug?extid=3e68572cf2286ce5ebe9
@@ -216,12 +204,13 @@ This was the shortlist at the time of selection (2026-01-06):
 - ReproSyz: https://syzkaller.appspot.com/text?tag=ReproSyz&x=13a67222580000
 
 
-## Notes / limitations
-- The “no special hardware” filter is heuristic and based on the **title**; it can be refined.
-- Some issues may still require special kernel config / debugging options; the script prints the syzbot `KernelConfig` link for that reason.
-- For deeper prioritization you could additionally scrape:
-  - whether a bug is already fixed
-  - whether there is a cause/fix bisection
-  - how frequently it reproduces
+## 备注 / 局限
 
-But for a first real patch, **reproducer availability + clear crash site** is usually the best ROI.
+- “不需要特殊硬件”的过滤是基于 **标题** 的启发式规则，仍可改进。
+- 有些问题可能仍需要特定内核配置/调试选项；脚本输出了 syzbot `KernelConfig` 链接以供参考。
+- 若需要更深入的优先级排序，可额外抓取：
+  - 是否已经修复
+  - 是否有 cause/fix bisection
+  - 复现频率
+
+但对于第一次实修补丁来说，**reproducer 可用性 + 清晰的 crash 位置** 通常是最高 ROI。

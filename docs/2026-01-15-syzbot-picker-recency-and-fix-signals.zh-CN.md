@@ -1,47 +1,35 @@
-# 2026-01-15 — “Recently reported” + stronger not-fixed filtering（简体中文）
+
+# 2026-01-15 — “最近报告” + 更强的未修复过滤
 
 [English](2026-01-15-syzbot-picker-recency-and-fix-signals.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+今天网络较慢，因此我们把精力放在：让 picker 在选择“新鲜工作（fresh work）”时更确定、更可重复。
 
-## 中文导读（章节列表）
+目标：
+- 优先选择 **最近报告且带 repro** 的问题
+- 排除 **已经修复 / dup / resolved** 的问题
+- 排除 **正在流转补丁** 的问题（启发式：关联的 lore thread 标题包含 `[PATCH`）
 
-- Changes
-- Example commands
+## 变更
 
-## English 原文
+更新脚本：`tools/syzbot_pick_unclaimed.py`
 
-# 2026-01-15 — “Recently reported” + stronger not-fixed filtering
+### 1) “报告时间新鲜度”过滤
 
-[简体中文](2026-01-15-syzbot-picker-recency-and-fix-signals.zh-CN.md)
-
-Network was slow today, so we focused on making the picker more deterministic for “fresh work” selection:
-
-Goal:
-- pick issues that were **recently reported with a repro**
-- avoid issues that are **already fixed / dup / resolved**
-- avoid issues with **patches in flight** (heuristic: linked lore thread subject contains `[PATCH`)
-
-## Changes
-
-Updated script: `tools/syzbot_pick_unclaimed.py`
-
-### 1) Report recency filters
-
-New CLI flags:
+新增 CLI 参数：
 
 - `--reported-after YYYY/MM/DD`
-  - Keep only bugs whose syzbot status line contains a parseable “reported … on YYYY/MM/DD” date **on/after** this date.
+  - 仅保留 syzbot 状态行中包含可解析的 “reported … on YYYY/MM/DD” 且日期 **不早于** 该值的 bug。
 - `--max-age-days N`
-  - Keep only bugs reported within the last `N` days.
-  - Requires the status line to contain a parseable “reported … on …” date.
+  - 仅保留在最近 `N` 天内报告的 bug。
+  - 依赖状态行中存在可解析的 “reported … on …” 日期。
 
-These are meant to support “just reported” triage instead of older backlog.
+这些参数用于支持“刚报告（just reported）”的优先级分流，而不是从较老的 backlog 里捞。
 
-### 2) Stronger “not fixed / not dup” exclusion
+### 2) 更强的 “未修复 / 非 dup” 排除
 
-Even if the status text is not explicit, the syzbot bug page may include fix-ish signals.
-The unclaimed picker now excludes a candidate if the bug page contains any of:
+即使状态文本不够明确，syzkaller bug 页面本身也可能包含“已修复/已解决”的信号。
+现在 unclaimed picker 会在 bug 页面包含以下任意关键词时排除候选：
 
 - `upstream: fixed`
 - `fixed:`
@@ -49,9 +37,9 @@ The unclaimed picker now excludes a candidate if the bug page contains any of:
 - `Resolved`
 - `dup`
 
-This mirrors the quick signals printed by `tools/syzbot_check_in_progress.py`.
+这与 `tools/syzbot_check_in_progress.py` 打印的快速信号保持一致。
 
-## Example commands
+## 示例命令
 
 ```bash
 # Recently reported (since 2026/01/01), still unclaimed, reproducible:

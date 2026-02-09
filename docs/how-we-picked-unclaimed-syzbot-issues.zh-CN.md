@@ -1,113 +1,99 @@
-# How we listed “unclaimed” syzbot issues (no patch in flight)（简体中文）
+# 如何列出“无人认领”的 syzbot 问题（没有补丁在路上）
 
 [English](how-we-picked-unclaimed-syzbot-issues.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录了我们在挑选问题时使用的工作流与脚本，目标是选择一个：
 
-## 中文导读（章节列表）
-
-- What “unclaimed” means (our heuristic)
-- Data sources
-- New script added
-- Relationship to existing scripts
-- Notes about speed/reliability
-
-## English 原文
-
-# How we listed “unclaimed” syzbot issues (no patch in flight)
-
-[简体中文](how-we-picked-unclaimed-syzbot-issues.zh-CN.md)
-
-This doc records the workflow and scripts used when we wanted to pick an issue that:
-- is reproducible (preferably has a C reproducer)
-- likely does not require special hardware
-- **does not already have a fix patch posted** (to avoid duplicating effort)
+- 可复现（最好有 C reproducer）
+- 不需要特殊硬件
+- **没有已经发布修复补丁**（避免重复劳动）
 
 
-## What “unclaimed” means (our heuristic)
+## “无人认领”的定义（启发式规则）
 
-Kernel work is coordinated over public email, but there is no perfect “lock”.
-So we use a practical, observable heuristic:
+内核工作通过公开邮件协作，但没有一个完美的“锁”。
+因此我们采用一个可观察、可执行的启发式规则：
 
-> Treat a syzbot issue as **in progress** only if its syzbot bug page links to a lore thread (`.../T/`) whose subject contains `[PATCH`.
+> 只有当 syzbot bug 页面链接到某个 lore thread（`.../T/`），且该 thread 的主题包含 `[PATCH` 时，我们才认为该问题 **已在推进**。
 
-If the linked lore thread subject is just `[syzbot] ...`, that’s a report thread, not a posted fix.
+如果关联的 lore thread 主题只是 `[syzbot] ...`，那是报告线程，并不是已发布修复补丁的线程。
 
-Limitations:
-- Someone could be working on it privately or on a different list without syzbot linking it yet.
-- A fix might already be in a subsystem maintainer tree but not in mainline.
+局限性：
 
-Still, this heuristic avoids the most common duplication: “a fix patch already posted to the public list”.
+- 有人可能私下在做，或者在其它邮件列表中推进，但 syzbot 还没链接上。
+- 修复可能已在子系统维护者树中，但尚未进入主线。
+
+尽管如此，这一规则能避免最常见的重复：**修复补丁已经公开发布** 的情况。
 
 
-## Data sources
+## 数据来源
 
-- syzbot upstream list (minimal JSON):
+- syzbot upstream 列表（最小化 JSON）：
   - https://syzkaller.appspot.com/upstream?json=1
 
-- per-bug HTML page:
+- 单个 bug 的 HTML 页面：
   - `https://syzkaller.appspot.com/bug?extid=...`
 
-- lore thread pages for linked threads:
+- 关联 thread 的 lore 页面：
   - `https://lore.kernel.org/.../T/`
 
 
-## New script added
+## 新增脚本
 
-We saved the selection logic into a runnable tool:
+我们把筛选逻辑保存成一个可运行的工具：
 
 - [tools/syzbot_pick_unclaimed.py](../tools/syzbot_pick_unclaimed.py)
 
-What it does:
-1) Fetch upstream list JSON (`/upstream?json=1`).
-2) For each bug, fetch its bug page HTML.
-3) Keep only bugs that have `ReproC` or `ReproSyz` links.
-4) Filter out obvious hardware-ish titles (USB/WiFi/BT/DRM/etc.).
-5) Follow any lore `.../T/` links and extract the subject from `<u id=u>...</u>`.
-6) Exclude bugs where any linked thread subject contains `[PATCH`.
+它的主要流程：
+1) 拉取 upstream 列表 JSON（`/upstream?json=1`）。
+2) 对每个 bug 抓取其 HTML 页面。
+3) 仅保留包含 `ReproC` 或 `ReproSyz` 链接的 bug。
+4) 过滤明显偏硬件的标题（USB/WiFi/BT/DRM 等）。
+5) 跟进所有 lore `.../T/` 链接，从 `<u id=u>...</u>` 提取主题。
+6) 若任何关联 thread 主题包含 `[PATCH`，则排除。
 
-Run examples:
+示例命令：
 
 ```bash
 ./tools/syzbot_pick_unclaimed.py
 ./tools/syzbot_pick_unclaimed.py --count 5 --scan-limit 2000
 ```
 
-Targeting specific areas (cgroup/namespaces/scheduler/GPU):
+定向筛选特定领域（cgroup/namespaces/scheduler/GPU）：
 
 ```bash
-# Prefer filtering by syzbot subsystem labels when possible:
+# 尽量优先使用 syzbot subsystem 标签：
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem cgroup
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem scheduler
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem namespaces
 
-# Or by regex over subsystem labels:
+# 或者对 subsystem 标签做正则：
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-subsystem-re '^(cgroup|memcg)$'
 
-# Or by keywords in the title (useful when subsystem labels are surprising):
+# 或者对标题关键词做正则（当 subsystem 标签不直观时很有用）：
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'cgroup|memcg'
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'namespace|setns|unshare|nsfs'
 ./tools/syzbot_pick_unclaimed.py --count 3 --include-title-re 'sched|scheduler|cfs|rtmutex'
 
-# GPU/DRM note: the default title exclusion includes drm/amdgpu/nouveau.
-# If you intentionally want GPU bugs, disable the default exclude filter:
+# GPU/DRM 说明：默认标题排除包含 drm/amdgpu/nouveau。
+# 如果明确要 GPU 相关问题，请关闭默认排除：
 ./tools/syzbot_pick_unclaimed.py --count 3 --no-exclude-title --include-title-re 'drm|amdgpu|nouveau'
 ```
 
 
-## Relationship to existing scripts
+## 与现有脚本的关系
 
 - [tools/syzbot_check_in_progress.py](../tools/syzbot_check_in_progress.py)
-  - Answers: “is this one issue already being worked on?”
-  - We fixed it to only treat a thread as patch-like if the lore subject contains `[PATCH`.
+  - 回答：“这个问题是否已经有人在做？”
+  - 我们修正了判断逻辑：只有当 lore 主题包含 `[PATCH` 才算“有补丁在路上”。
 
 - [tools/syzbot_pick_top3.py](../tools/syzbot_pick_top3.py)
-  - The earlier “pick 3 good starter issues” script.
-  - It does not try to determine “unclaimed”; it only looks for reproducibility + avoids hardware-ish titles.
+  - 早期的“挑 3 个入门问题”脚本。
+  - 它不判断“是否无人认领”，只做可复现性 + 排除硬件类标题。
 
 
-## Notes about speed/reliability
+## 关于速度/可靠性的说明
 
-- The syzbot JSON list is minimal, so we must scrape HTML pages.
-- That means many HTTP requests. The script uses timeouts and small sleeps.
-- If you see 0 results, try increasing `--scan-limit` or relaxing the hardware-title filter.
+- syzbot 的 JSON 列表很简洁，因此必须抓取 HTML 页面。
+- 这会带来大量 HTTP 请求；脚本使用了超时和小 sleep 来避免卡死。
+- 如果结果为 0，尝试提高 `--scan-limit` 或放宽硬件类标题过滤条件。

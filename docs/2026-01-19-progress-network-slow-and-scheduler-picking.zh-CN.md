@@ -1,67 +1,54 @@
-# 2026-01-19 — Progress note (network slow; scheduler picking)（简体中文）
+# 2026-01-19 — 进展记录（网络慢；选择调度相关问题）
 
 [English](2026-01-19-progress-network-slow-and-scheduler-picking.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+> 说明：本文为简体中文翻译版；命令、URL、日志片段与代码符号保持原样，便于精确对照。
 
-## 中文导读（章节列表）
+## 今天尝试了什么
 
-- What we tried
-- Observations
-- Result
-- Next attempt (tomorrow)
+今日目标：
+- 选择 **3 个最近报告**、带 **repro**、**未修复/非 dup**，并且看起来 **无人认领** 的问题（lore thread 标题中没有包含 `[PATCH` 的关联主题）。
+- 重点关注“调度器相关/邻近”的症状（hung task / lockup / RCU stall / workqueue 等）。
 
-## English 原文
+## 观察
 
-# 2026-01-19 — Progress note (network slow; scheduler picking)
+### 1) 网络不稳定会阻塞“批量扫很多 bug 页面”的工作流
 
-[简体中文](2026-01-19-progress-network-slow-and-scheduler-picking.zh-CN.md)
+- 选择器脚本对每个候选 bug 都依赖从 syzkaller 拉取 HTML 页面。
+- 网络慢/不稳定时，经常卡在 TLS 握手或读取阶段。
+- 这会让“scan-limit 上千”的交互式筛选基本不可用。
 
-## What we tried
+### 2) Scheduler 不是 syzkaller upstream 的一等 subsystem label
 
-Goal today:
-- pick **3 recently reported** issues with a **repro**, that are **not fixed/dup**, and appear **unclaimed** (no linked lore thread subject containing `[PATCH`).
-- focus on scheduler-adjacent symptoms (hung tasks / lockups / RCU stalls / workqueue).
+- `https://syzkaller.appspot.com/upstream?json=1` 的 JSON 只包含 `{title, link}`。
+- `https://syzkaller.appspot.com/upstream` 的 upstream subsystem 过滤列表里没有明显的 scheduler 标签。
+- 目前可行的折中是：先用 `kernel` 作为粗粒度区域（`/upstream/s/kernel`），再依靠标题关键词进一步收敛。
 
-## Observations
+### 3) 现有“kernel + 调度相关”短名单偏旧
 
-### 1) Network instability blocks the “scan many bug pages” workflow
-
-- The picker scripts rely on per-bug HTML fetches from syzkaller.
-- With slow/unstable network, runs often stall on TLS handshake / reads.
-- This makes “scan-limit in the thousands” impractical interactively.
-
-### 2) Scheduler is not a first-class syzkaller upstream subsystem label
-
-- `https://syzkaller.appspot.com/upstream?json=1` only contains `{title, link}`.
-- The upstream subsystem filter list on `https://syzkaller.appspot.com/upstream` didn’t show obvious scheduler labels.
-- We found we can at least use `kernel` as a broad area (`/upstream/s/kernel`), and then rely on title keywords to narrow.
-
-### 3) The existing “kernel scheduler-adjacent” shortlist we saw was older
-
-When we fell back to `tools/syzbot_pick_top3.py` (ignores unclaimed/freshness constraints), it returned:
+当退回使用 `tools/syzbot_pick_top3.py`（忽略“无人认领/新鲜度”约束）时，得到：
 
 - `ed53e35a1e9dde289579` — INFO: task hung in `p9_fd_close (3)`
 - `68c586d577defab7485e` — INFO: task hung in `vmci_qp_broker_detach`
 - `a50479d6d26ffd27e13b` — INFO: task hung in `worker_attach_to_pool (3)`
 
-But these are not “just reported” (reported in 2025/08–10) and at least one has a dup signal.
+但这些并非“刚报告”的问题（报告时间在 2025/08–10），且至少一个有 dup 信号。
 
-### 4) In-progress/fix signals check
+### 4) in-progress / fix signals 检查
 
-- `tools/syzbot_check_in_progress.py ed53e35a1e9dde289579` showed a dup signal (bug page contains “closed as dup ...”).
-- The other two above did not obviously show patch-like lore subjects in the first quick check output.
+- `tools/syzbot_check_in_progress.py ed53e35a1e9dde289579` 显示了 dup 信号（bug 页面包含 “closed as dup ...”）。
+- 另外两个在第一次快速检查输出中，没有明显看到类似补丁的 lore subject。
 
-## Result
+## 结果
 
-We did **not** reliably produce 3 “fresh + unclaimed + scheduler-area” candidates today due to network slowness.
+由于网络较慢，今天 **没能稳定地** 产出 3 个“新鲜 + 无人认领 + 调度相关”的候选问题。
 
-## Next attempt (tomorrow)
+## 下一步（明天）
 
-Suggested low-network approach:
+建议采用低网络消耗的方式：
 
-1) Use a smaller candidate list first (e.g. from `https://syzkaller.appspot.com/upstream/s/kernel`) to reduce scanning.
-2) Apply strict recency filter in the picker:
+1) 先用更小的候选集合（例如从 `https://syzkaller.appspot.com/upstream/s/kernel` 获取）来减少扫描量。
+2) 在 picker 中启用更严格的“新鲜度”过滤：
 
 ```bash
 ./tools/syzbot_pick_unclaimed.py \
@@ -71,7 +58,7 @@ Suggested low-network approach:
   --include-title-re 'rcu|stall|hung|soft lockup|lockup|scheduling|preempt|watchdog|workqueue|kthread'
 ```
 
-If this still returns nothing, relax in this order:
-- widen date window (use `--max-age-days 60`)
-- drop `--include-subsystem kernel` (keep title regex)
-- temporarily drop the scheduler-adjacent regex and just pick 3 fresh unclaimed issues, then choose one closer to scheduler.
+如果仍然挑不出 3 个，按以下顺序放宽：
+- 放宽日期窗口（使用 `--max-age-days 60`）
+- 去掉 `--include-subsystem kernel`（保留标题正则）
+- 暂时去掉“调度相关”正则：先挑 3 个新鲜、无人认领的问题，然后再从中选一个更接近调度器的。

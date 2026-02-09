@@ -1,61 +1,48 @@
-# How to extract and review lore thread follow-ups (replies)（简体中文）
+# 如何提取并审阅 lore 线程的跟进回复
 
 [English](how-to-review-lore-thread-followups.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录我们如何确认你的补丁是否在 lore.kernel.org 收到跟进回复，以及如何提取回复内容。
 
-## 中文导读（章节列表）
+为什么重要：
 
-- Key lore endpoints you can use (most reliable)
-- Workflow we used
-- Saved reusable script
-- What we found (your patch thread)
-
-## English 原文
-
-# How to extract and review lore thread follow-ups (replies)
-
-[简体中文](how-to-review-lore-thread-followups.zh-CN.md)
-
-This doc records how we checked whether your patch got follow-up replies on lore.kernel.org, and how we extracted the reply content.
-
-Why this matters:
-- Follow-ups often contain review feedback, “applied/queued” status, or requests for v2.
-- lore’s HTML search may sometimes show a bot-check page, but the thread feeds/mbox downloads are often still accessible.
+- 回复里常包含 review 反馈、“applied/queued” 状态或需要 v2 的请求。
+- lore 的 HTML 搜索有时会出现 bot-check 页面，但 thread feed/mbox 下载往往仍可用。
 
 
-## Key lore endpoints you can use (most reliable)
+## 最可靠的 lore 端点
 
-Given a **Message-ID** (without surrounding `<>`) and a lore **list name**:
+给定一个 **Message-ID**（不含外层 `<>`）和一个 lore **list 名称**：
 
-- Thread Atom feed (shows every message in the thread):
+- Thread Atom feed（显示线程中的每条消息）：
   - `https://lore.kernel.org/<list>/<message-id>/t.atom`
 
-- Thread mbox (downloadable, importable into mail clients):
+- Thread mbox（可下载、可导入邮件客户端）：
   - `https://lore.kernel.org/<list>/<message-id>/t.mbox.gz`
 
-- Individual raw message (RFC822/mbox form):
+- 单条 raw 消息（RFC822/mbox）：
   - `https://lore.kernel.org/<list>/<message-id>/raw`
 
-For your patch:
+以你的补丁为例：
+
 - List: `lkml`
 - Message-ID: `20260106040158.31461-1-oldrunner999@gmail.com`
 
-So:
+因此：
 - `t.atom`: `https://lore.kernel.org/lkml/20260106040158.31461-1-oldrunner999@gmail.com/t.atom`
 - `t.mbox.gz`: `https://lore.kernel.org/lkml/20260106040158.31461-1-oldrunner999@gmail.com/t.mbox.gz`
 
 
-## Workflow we used
+## 我们使用的流程
 
-### Step 1 — Count replies using the thread Atom feed
+### 步骤 1 — 使用 thread Atom feed 统计回复数
 
-We fetched `t.atom` and counted `<entry>` elements.
+我们拉取 `t.atom` 并统计 `<entry>` 数量。
 
-- If there’s only 1 entry, it’s just your original message (no replies).
-- If it’s >1, there are replies/follow-ups.
+- 如果只有 1 个 entry，那就是你的原始消息（没有回复）。
+- 如果 >1，则说明有回复/跟进。
 
-Example script:
+示例脚本：
 
 ```bash
 python3 - <<'PY'
@@ -90,17 +77,19 @@ PY
 ```
 
 
-### Step 2 — Download the full thread via `t.mbox.gz` and list messages
+### 步骤 2 — 下载 `t.mbox.gz` 并列出线程消息
 
-We fetched the gzipped mbox and parsed out each message:
+我们下载并解压 mbox，然后解析每条消息：
+
 - `From`, `Date`, `Subject`, `Message-ID`, `In-Reply-To`
 
-This is the most robust way to confirm:
-- who replied
-- how many replies
-- the exact reply Message-IDs
+这是最稳妥的方式，可确认：
 
-Example script:
+- 谁回复了
+- 有多少回复
+- 回复的 Message-ID
+
+示例脚本：
 
 ```bash
 python3 - <<'PY'
@@ -141,12 +130,13 @@ PY
 ```
 
 
-### Step 3 — Fetch specific replies and read them (`/raw`)
+### 步骤 3 — 拉取具体回复并阅读（`/raw`）
 
-Once we had reply Message-IDs, we fetched each reply’s raw RFC822 form:
+拿到回复 Message-ID 之后，我们逐一拉取 raw RFC822 内容：
+
 - `https://lore.kernel.org/lkml/<reply-message-id>/raw`
 
-Example script (prints the first chunk of each reply body):
+示例脚本（打印每条回复正文的前一部分）：
 
 ```bash
 python3 - <<'PY'
@@ -185,9 +175,9 @@ PY
 ```
 
 
-## Saved reusable script
+## 已保存的可复用脚本
 
-We saved this workflow into a reusable tool:
+我们把上述流程保存成可复用工具：
 - [tools/lore_thread_followups.py](../tools/lore_thread_followups.py)
 
 Example:
@@ -198,7 +188,7 @@ Example:
 ```
 
 
-## What we found (your patch thread)
+## 我们的结果（你的补丁线程）
 
-Using the above approach, we found 2 replies from Peter Zijlstra.
-One of them indicates he picked up the patch and adjusted it to include generated-file updates; the other notes a small spurious change was fixed.
+按照上述流程，我们发现 Peter Zijlstra 有 2 条回复。
+其中一条表示他已采纳补丁并补上了生成文件的更新；另一条说明修正了一个小的多余改动。

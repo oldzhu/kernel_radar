@@ -1,125 +1,119 @@
-# How to check if a kernel issue is already being worked on（简体中文）
+# 如何判断一个内核问题是否已有人在处理
 
 [English](how-to-check-if-an-issue-is-already-being-worked.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录我们用于回答以下问题的工作流：
 
-## 中文导读（章节列表）
+1) **这个问题是否已修复？**
+2) **是否已有他人在推进（补丁在路上）？**
 
-- The key idea
-- Workflow we used (and why)
-- The scripts/commands we used (record)
-- What we found for issue #1 (example outcome)
+这一步很关键，可以避免重复劳动，并帮助我们尽快转向：
 
-## English 原文
-
-# How to check if a kernel issue is already being worked on
-
-[简体中文](how-to-check-if-an-issue-is-already-being-worked.zh-CN.md)
-
-This doc records the workflow we used to answer:
-
-1) **Is this issue already fixed?**
-2) **Is someone else already working on it (patch in flight)?**
-
-This is important so we don’t duplicate effort and so we can pivot to:
-- testing an existing patch
-- helping with root-cause analysis
-- picking a different issue
+- 测试已有补丁
+- 协助根因分析
+- 改选其他问题
 
 
-## The key idea
+## 核心思路
 
-Kernel collaboration happens primarily via **public email threads** (lore, mailing lists) plus trackers like **syzbot**.
+内核协作主要通过 **公开邮件线程**（lore、邮件列表）以及 **syzbot** 等跟踪器完成。
 
-So the most reliable signals are:
-- a **patch** already posted to the relevant list (often `netdev`, `linux-mm`, `linux-fsdevel`, etc.)
-- maintainer replies like “applied”, “queued”, “sent to net-next”, etc.
-- a **fix commit** already merged (or queued in a subsystem tree)
+因此，最可靠的信号包括：
+
+- 已经向相关列表提交了 **补丁**（例如 `netdev`、`linux-mm`、`linux-fsdevel` 等）
+- 维护者回复 “applied”、“queued”、“sent to net-next”等
+- **修复提交** 已经合并（或在子系统维护者树中排队）
 
 
-## Workflow we used (and why)
+## 我们使用的流程（及原因）
 
-### Step 1 — Check syzbot status + linked thread
+### 步骤 1 — 查看 syzbot 状态与关联线程
 
-For syzbot issues, start from the bug page:
+对于 syzbot 问题，先从 bug 页面开始：
 
-- Example (issue #1 we checked):
+- 例子（我们检查的 issue #1）：
   - https://syzkaller.appspot.com/bug?extid=3e68572cf2286ce5ebe9
 
-What to look for:
-- **Status:** line
-  - If you see “fixed / dup / invalid”, it’s probably resolved.
-  - If it says “reported …”, it might still be in progress or might already have a patch (syzbot often lags until it retests).
-- The **status link** usually points to the original report thread (often Google Groups `syzkaller-bugs`) and sometimes lore.
+关注点：
 
-Why this matters:
-- This tells you whether syzbot *knows* about a fix.
-- It also gives you the canonical report thread to follow.
+- **Status：** 行
+  - 如果看到 “fixed / dup / invalid”，通常说明已解决。
+  - 如果是 “reported …”，可能还在推进，也可能已有补丁（syzbot 往往需要重新测试后才更新状态）。
+- **status 链接** 通常指向原始报告线程（多为 Google Groups 的 `syzkaller-bugs`），有时也包含 lore 链接。
+
+为什么重要：
+
+- 这能判断 syzbot 是否 *知道* 有修复。
+- 也能定位到规范的报告线程，方便后续跟进。
 
 
-### Step 2 — Follow the lore thread links (look for [PATCH])
+### 步骤 2 — 跟进 lore 线程链接（寻找 [PATCH]）
 
-On many syzbot pages, there are links to lore threads (example for #1):
+很多 syzbot 页面包含 lore 线程链接（以 #1 为例）：
 
 - https://lore.kernel.org/all/20260105093630.1976085-1-edumazet@google.com/T/
 
-If you see a lore subject like:
+如果看到类似的 lore 主题：
 - `[PATCH net] ... skb_attempt_defer_free ...`
 
-…then the issue is already being actively worked on.
+…那么说明该问题已有人在积极推进。
 
-Why this matters:
-- It’s common (especially in active subsystems like net) for a maintainer to quickly post a patch that references the syzbot report.
+为什么重要：
+
+- 在 net 等活跃子系统中，维护者很常见会快速发布引用 syzbot 报告的补丁。
 
 
-### Step 3 — Fetch the patch mail (raw mbox) and confirm it really targets the report
+### 步骤 3 — 拉取补丁邮件（raw mbox）并确认确实针对该报告
 
-We confirm by fetching the raw message for the patch email from lore.
+我们通过从 lore 拉取补丁邮件的 raw 消息来确认。
 
-Important lore detail we discovered:
-- For a specific message URL like:
+我们发现的 lore 细节：
+
+- 对于某个消息 URL，例如：
   - `https://lore.kernel.org/all/<message-id>/`
-- The **raw mbox** is at:
+- **raw mbox** 位于：
   - `https://lore.kernel.org/all/<message-id>/raw`
 
-`...?raw=1` often returns HTML, not RFC822.
+`...?raw=1` 往往返回 HTML，而不是 RFC822。
 
-After you fetch the raw message, check for:
+拉到 raw 消息后，检查是否包含：
+
 - `Reported-by: syzbot+<extid>@...`
 - `Closes: <link to the syzbot report thread>`
 - `Fixes: <commit>`
 
-If these exist and the diff touches the area in the crash, it’s a strong sign the issue is already covered.
+如果这些标记存在且 diff 触及崩溃区域，基本可以确认该问题已被覆盖。
 
 
-### Step 4 — Optional: Git-side sanity checks
+### 步骤 4 — 可选：Git 侧的健全性检查
 
-Even if a patch exists, it might already be merged.
+即便补丁存在，也可能已经合并。
 
-Useful quick checks in your kernel tree:
+在你的内核树里可以快速检查：
 
-- Look at recent changes to the crash site file:
+- 查看崩溃文件的近期变更：
   - `git log --oneline --max-count=50 -- <path>`
 
-- Search for commits that touch a function name:
+- 搜索触及某个函数名的提交：
   - `git log -p -S 'function_name' -- <path>`
 
-- If you have a known `Fixes:` commit hash from a patch, you can see if it’s in your tree:
+- 如果你已经知道补丁里有 `Fixes:` 的 commit hash，可检查它是否在你的树里：
   - `git show <hash>`
 
-Why this matters:
-- Sometimes a fix has landed but syzbot hasn’t retested yet.
+为什么重要：
+
+- 有时修复已经落地，但 syzbot 还未重新测试。
 
 
-## The scripts/commands we used (record)
+## 我们使用的脚本/命令（记录）
 
-### A) Scrape the syzbot bug page for status + thread links
+### A) 抓取 syzbot bug 页面中的状态与线程链接
 
-This prints:
+它会输出：
+
 - Title
-- Status text + status link
-- lore links (including patch threads if present)
+- Status 文本 + status 链接
+- lore 链接（若存在 patch 线程也会显示）
 
 ```bash
 python3 - <<'PY'
@@ -154,9 +148,9 @@ PY
 ```
 
 
-### B) Fetch/parse the lore patch message as raw mbox
+### B) 以 raw mbox 方式拉取/解析 lore 补丁邮件
 
-This confirms whether a posted patch is directly tied to the syzbot report:
+用于确认已发布补丁是否直接关联该 syzbot 报告：
 
 ```bash
 python3 - <<'PY'
@@ -194,9 +188,9 @@ PY
 ```
 
 
-### C) Small reusable helper script
+### C) 小型可复用辅助脚本
 
-We also saved a small helper script you can rerun:
+我们也保存了一个可复用的小脚本：
 - [tools/syzbot_check_in_progress.py](../tools/syzbot_check_in_progress.py)
 
 Example:
@@ -205,21 +199,24 @@ Example:
 ./tools/syzbot_check_in_progress.py 3e68572cf2286ce5ebe9
 ```
 
-What it outputs:
-- syzbot title/status
+输出内容：
+
+- syzbot 的 title/status
 - status link
-- lore links found on the bug page (and “patch-like” thread links)
+- bug 页面上的 lore 链接（以及被识别为“类似补丁”的线程链接）
 
 
-## What we found for issue #1 (example outcome)
+## issue #1 的结果示例
 
 Issue:
 - https://syzkaller.appspot.com/bug?extid=3e68572cf2286ce5ebe9
 
-Result:
-- syzbot showed it as “reported”, but the bug page linked a lore thread containing:
-  - `[PATCH net] udp: call skb_orphan() before skb_attempt_defer_free()`
-- The patch email contained `Reported-by` and `Closes` pointing back to the syzbot report.
+结果：
 
-Conclusion:
-- The issue was already being worked on (a fix patch was already posted).
+- syzbot 显示为 “reported”，但 bug 页面链接到了一个包含以下主题的 lore 线程：
+  - `[PATCH net] udp: call skb_orphan() before skb_attempt_defer_free()`
+- 补丁邮件包含 `Reported-by` 与 `Closes`，明确指向该 syzbot 报告。
+
+结论：
+
+- 该问题已经有人在推进（修复补丁已发布）。

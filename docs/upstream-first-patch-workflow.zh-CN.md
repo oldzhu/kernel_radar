@@ -1,135 +1,111 @@
-# Upstream Linux: first patch workflow (email-based)（简体中文）
+# 上游 Linux：首个补丁工作流（邮件方式）
 
 [English](upstream-first-patch-workflow.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+本文记录我们通过邮件完成首个上游 Linux 内核补丁的 **手工流程**（端到端）。
 
-## 中文导读（章节列表）
+写下它是为了后续能用 `kernel_radar` AI agent 自动化部分环节。
 
-- Scope
-- Preconditions
-- 0) Clone upstream Linux
-- 1) Create a topic branch
-- 2) Make a tiny change
-- 3) Commit with kernel conventions
-- 4) Run checkpatch
-- 5) Determine recipients (maintainers + lists)
-- 6) Generate the patch file
-- 7) Install and configure git-send-email (host)
-- 8) Dry-run send (recommended)
-- 9) Send for real
-- 10) Confirm it appears on lore
-- 11) Handling review (v2 / threading)
-- Notes for future automation
+## 范围
 
-## English 原文
+- 目标：**上游主线**（kernel.org），标准 **邮件** 流程（不是 GitHub PR）。
+- 示例补丁：`scripts/atomic/kerneldoc/try_cmpxchg` 的一个小拼写修复。
+- 邮件发送：**Gmail SMTP**，从 host 以 `oldrunner999@gmail.com` 发送。
 
-# Upstream Linux: first patch workflow (email-based)
+## 前置条件
 
-[简体中文](upstream-first-patch-workflow.zh-CN.md)
+- 你有 upstream Linux 的 clone（示例路径：`~/mylinux/linux`）。
+- 你有可用的 `git` 身份（姓名/邮箱）。
+- 你可以通过 SMTP 发送邮件。
 
-This document captures the **manual workflow** we used to send the first upstream Linux kernel patch via email, end-to-end.
+## 0) 克隆 upstream Linux
 
-It’s written so we can later automate parts of it with the `kernel_radar` AI agent.
-
-## Scope
-
-- Target: **upstream mainline** (kernel.org) via the standard **email** workflow (not GitHub PRs).
-- Example patch: small typo fix in `scripts/atomic/kerneldoc/try_cmpxchg`.
-- Mail transport: **Gmail SMTP**, sending as `oldrunner999@gmail.com` from the host.
-
-## Preconditions
-
-- You have a clone of upstream Linux (example path used here): `~/mylinux/linux`
-- You have a working `git` identity (name/email).
-- You can send email via SMTP.
-
-## 0) Clone upstream Linux
-
-From your projects directory:
+在项目目录下：
 
 - `cd ~/mylinux`
 - `git clone https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git`
 
-## 1) Create a topic branch
+## 1) 创建主题分支
 
 - `cd ~/mylinux/linux`
 - `git checkout -b oldzhu/atomic-kerneldoc-spelling`
 
-## 2) Make a tiny change
+## 2) 做一个很小的改动
 
-We fixed a typo in a kerneldoc template:
+我们修复了 kerneldoc 模板中的拼写错误：
 
-- File: `scripts/atomic/kerneldoc/try_cmpxchg`
-- Change: `occured` → `occurred`
+- 文件：`scripts/atomic/kerneldoc/try_cmpxchg`
+- 改动：`occured` → `occurred`
 
-Edit the file, then confirm the diff:
+编辑后确认 diff：
 
 - `git diff`
 
-## 3) Commit with kernel conventions
+## 3) 按内核规范提交
 
-Kernel expectations:
-- A short subject line with subsystem prefix (`scripts/atomic: ...`)
-- A brief body explaining the change
-- A `Signed-off-by:` line (use `-s`)
+内核期望：
 
-We also decided to send using Gmail (`oldrunner999@gmail.com`) as the From address.
+- 简短主题行，含子系统前缀（`scripts/atomic: ...`）
+- 简要说明改动
+- `Signed-off-by:` 行（用 `-s`）
 
-Set per-repo identity (safe; doesn’t affect other repos):
+我们决定使用 Gmail（`oldrunner999@gmail.com`）作为 From 地址发送。
+
+设置仓库级身份（安全，不影响其他仓库）：
 
 - `git config user.name "oldzhu"`
 - `git config user.email "oldrunner999@gmail.com"`
 
-Commit:
+提交：
 
 - `git commit -s -am "scripts/atomic: fix kerneldoc spelling in try_cmpxchg"`
 
-If you need to fix the message/body or author later:
+如需之后修正文案/作者：
 
 - `git commit --amend --reset-author -s`
 
-(We used amend to ensure there was exactly one `Signed-off-by:` line for the Gmail address and that `checkpatch.pl` was clean.)
+（我们使用 amend 来确保只有一条 `Signed-off-by:`，且 `checkpatch.pl` 通过。）
 
-## 4) Run checkpatch
+## 4) 运行 checkpatch
 
 - `./scripts/checkpatch.pl -g HEAD`
 
-Goal: ideally **0 errors, 0 warnings**.
+目标：**0 errors, 0 warnings**。
 
-If there are issues, fix them and amend, then re-run checkpatch.
+如有问题，修复后 amend，再次运行 checkpatch。
 
-## 5) Determine recipients (maintainers + lists)
+## 5) 确定收件人（维护者 + 邮件列表）
 
 - `./scripts/get_maintainer.pl -f scripts/atomic/kerneldoc/try_cmpxchg`
 
-Example output included:
-- maintainers/reviewers for atomic infrastructure
+输出示例包括：
+
+- atomic 基础设施相关维护者/评审
 - `linux-kernel@vger.kernel.org`
 
-These become your `--to` / `--cc` recipients.
+这些将作为 `--to` / `--cc` 收件人。
 
-## 6) Generate the patch file
+## 6) 生成补丁文件
 
-Create an `outgoing/` folder and generate a `0001-...patch` file:
+创建 `outgoing/` 并生成 `0001-...patch`：
 
 - `mkdir -p outgoing`
 - `git format-patch -1 --output-directory outgoing HEAD`
 
-Preview the patch header:
+预览补丁头：
 
 - `sed -n '1,60p' outgoing/*.patch`
 
-## 7) Install and configure git-send-email (host)
+## 7) 安装并配置 git-send-email（host）
 
-We send from the **host** (not inside the container) to keep credentials simpler.
+我们在 **host** 侧发送（不在容器内），以便简化凭证处理。
 
-Install the tool:
+安装工具：
 
 - `sudo apt-get update -y`
 - `sudo apt-get install -y git-email`
 
-Configure Gmail SMTP:
+配置 Gmail SMTP：
 
 - `git config --global sendemail.smtpserver smtp.gmail.com`
 - `git config --global sendemail.smtpserverport 587`
@@ -137,31 +113,32 @@ Configure Gmail SMTP:
 - `git config --global sendemail.smtpuser oldrunner999@gmail.com`
 - `git config --global sendemail.from "oldzhu <oldrunner999@gmail.com>"`
 
-Inspect the config:
+检查配置：
 
 - `git config --global --get-regexp '^sendemail\.'`
 
 ### Gmail App Password
 
-Gmail SMTP generally requires an **App Password**:
-- enable Google 2FA
-- create an App Password for something like “git-send-email”
+Gmail SMTP 通常需要 **App Password**：
 
-Do **not** paste the App Password into chat.
+- 启用 Google 2FA
+- 创建一个 App Password（例如用于 “git-send-email”）
 
-## 8) Dry-run send (recommended)
+**不要** 在聊天里粘贴 App Password。
 
-This does **not** send anything:
+## 8) 试运行发送（推荐）
+
+该步骤 **不会** 发送邮件：
 
 - `git send-email --dry-run outgoing/0001-*.patch --to will@kernel.org --cc ... --confirm=always`
 
-Use this to verify recipients and headers.
+用于确认收件人和邮件头是否正确。
 
-## 9) Send for real
+## 9) 正式发送
 
-We hit a VS Code askpass issue where the password prompt didn’t behave well.
+我们遇到 VS Code 的 askpass 提示异常，导致密码输入不稳定。
 
-The fix was to force a real terminal prompt and bypass askpass:
+解决办法：强制真实终端提示并绕过 askpass：
 
 - `env -u GIT_ASKPASS -u SSH_ASKPASS GIT_TERMINAL_PROMPT=1 \
   git send-email outgoing/0001-*.patch \
@@ -173,46 +150,51 @@ The fix was to force a real terminal prompt and bypass askpass:
     --cc linux-kernel@vger.kernel.org \
     --confirm=always`
 
-When prompted:
+提示时输入：
+
 - username: `oldrunner999@gmail.com`
-- password: your **Gmail App Password**
+- password: 你的 **Gmail App Password**
 
-Successful send output includes an `OK` status and a `Message-ID`.
+成功发送的输出会包含 `OK` 状态和 `Message-ID`。
 
-Example `Message-ID` from our first send:
+我们首次发送的 `Message-ID` 示例：
+
 - `<20260106040158.31461-1-oldrunner999@gmail.com>`
 
-## 10) Confirm it appears on lore
+## 10) 确认出现在 lore
 
-Wait a few minutes, then search lore:
+等待几分钟后在 lore 搜索：
 
-- By Message-ID (URL-encoded):
+- 按 Message-ID（URL 编码）：
   - `https://lore.kernel.org/lkml/?q=20260106040158.31461-1-oldrunner999%40gmail.com`
 
-- By subject keywords:
+- 按主题关键词：
   - `https://lore.kernel.org/lkml/?q=scripts%2Fatomic%3A+fix+kerneldoc+spelling+in+try_cmpxchg`
 
-## 11) Handling review (v2 / threading)
+## 11) 处理评审（v2 / threading）
 
-If reviewers request changes:
+若评审要求修改：
 
-1) Make the change
+1) 修改内容
 2) `git commit --amend -s`
-3) Regenerate a v2 patch:
-- `rm -f outgoing/*.patch`
-- `git format-patch -1 -v2 --output-directory outgoing HEAD`
+3) 生成 v2 补丁：
+   - `rm -f outgoing/*.patch`
+   - `git format-patch -1 -v2 --output-directory outgoing HEAD`
 
-4) Send v2 in the same thread (keep continuity):
+4) 在同一线程发送 v2（保持上下文）：
+
 - `git send-email --in-reply-to <MESSAGE_ID_FROM_V1> outgoing/0001-*.patch ...`
 
-## Notes for future automation
+## 未来自动化的注意事项
 
-An agent can help automate/summarize:
-- pick low-risk candidate patches/bugs
-- run `checkpatch.pl` and summarize failures
-- run `get_maintainer.pl` and build a send command
-- generate the patch and a “ready to send” checklist
+agent 可帮助自动化/总结：
 
-But:
-- never auto-send email without explicit human approval
-- never store SMTP credentials in repo
+- 选择低风险候选补丁/bug
+- 运行 `checkpatch.pl` 并总结失败点
+- 运行 `get_maintainer.pl` 并生成发送命令
+- 生成补丁并给出“可发送”清单
+
+但：
+
+- 未经明确人工许可，**不要** 自动发送邮件
+- **不要** 在仓库中保存 SMTP 凭证

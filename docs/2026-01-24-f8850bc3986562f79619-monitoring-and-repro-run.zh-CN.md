@@ -1,33 +1,21 @@
-# 2026-01-24 — f8850bc3986562f79619 — monitoring + ReproC run（简体中文）
+# 2026-01-24 — f8850bc3986562f79619 — 监控 + 运行 ReproC
 
 [English](2026-01-24-f8850bc3986562f79619-monitoring-and-repro-run.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+## 目标
 
-## 中文导读（章节列表）
+尝试复现 syzbot 报告：
 
-- Goal
-- Setup / how it was run
-- Observation
-- Next
-- Additional reruns (same day)
-
-## English 原文
-
-# 2026-01-24 — f8850bc3986562f79619 — monitoring + ReproC run
-
-[简体中文](2026-01-24-f8850bc3986562f79619-monitoring-and-repro-run.zh-CN.md)
-
-## Goal
-Attempt to reproduce the syzbot report:
 - extid: `f8850bc3986562f79619`
 - title: `INFO: rcu detected stall in br_handle_frame (6)`
 
-## Setup / how it was run
-Repro bundle directory:
+## 环境与运行方式
+
+repro bundle 目录：
+
 - `repro/f8850bc3986562f79619/`
 
-QEMU was run in daemon mode (persistent serial log + pidfile), with snapshot mode (no disk persistence):
+QEMU 以 daemon 模式运行（持续写串口日志 + pidfile），并开启 snapshot 模式（不持久化磁盘改动）：
 
 ```bash
 cd repro/f8850bc3986562f79619
@@ -37,7 +25,7 @@ DAEMONIZE=1 ./run_qemu.sh
 # ssh:    root@localhost -p 10022
 ```
 
-Guest is Buildroot and did not include a compiler or syzkaller executors (`syz-execprog`/`syz-executor`), so the ReproC binary was built on the host and copied in via scp:
+Guest 使用 Buildroot，不包含编译器，也不包含 syzkaller executors（`syz-execprog`/`syz-executor`），因此我们在 host 上构建 ReproC 二进制，并通过 scp 拷贝进 guest：
 
 ```bash
 # host build (static)
@@ -50,13 +38,15 @@ scp -P 10022 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null repro r
 ssh -p 10022 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@localhost '/root/repro & echo REPRO_PID=$!'
 ```
 
-## Observation
-While the repro was running, the serial log captured an RCU stall report. Notably:
-- `rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:`
-- followed by NMI backtraces and an RCU GP kthread starvation report (`rcu_preempt kthread starved ...`).
-- shortly after, SSH became unresponsive (banner exchange timeout). QEMU process remained alive, but no further serial output was observed beyond the stall stacks.
+## 观察
 
-Excerpt from `qemu-serial.log` (trimmed):
+在 repro 运行过程中，串口日志捕获到了 RCU stall 报告。关键点：
+
+- `rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:`
+- 随后是 NMI backtraces，以及 RCU GP kthread 饥饿报告（`rcu_preempt kthread starved ...`）。
+- 不久后，SSH 变得不可用（banner exchange timeout）。QEMU 进程仍存活，但除了 stall 堆栈外，串口输出没有明显继续推进。
+
+`qemu-serial.log` 片段（已裁剪）：
 
 ```text
 [  242.521441][    C1] hrtimer: interrupt took 87634924810 ns
@@ -69,40 +59,47 @@ Excerpt from `qemu-serial.log` (trimmed):
 [  429.960892][    C0] rcu: rcu_preempt kthread starved for 10502 jiffies! g=24285 f0x0 RCU_GP_WAIT_FQS(5)
 ```
 
-### Notes
-- This run did **not** show `br_handle_frame` in the serial log (simple string search returned no matches).
-- Even without the exact `br_handle_frame` signature, the repro appears to be stressing networking/bridge paths (lots of virtual netdevice setup is visible before the stall).
+### 备注
 
-## Next
-Try a rerun with more resources to reduce scheduler starvation effects:
+- 此次运行在串口日志中 **没有** 出现 `br_handle_frame`（简单字符串搜索没有匹配）。
+- 即使缺少精确的 `br_handle_frame` 特征，repro 仍然看起来在施压 networking/bridge 路径（stall 之前能看到大量虚拟网卡相关的 setup）。
+
+## 下一步
+
+尝试用更多资源重跑，以减少调度饥饿的影响：
 
 ```bash
 cd repro/f8850bc3986562f79619
 SMP=4 MEM=4096 DAEMONIZE=1 SERIAL_LOG=$PWD/qemu-serial-2cpu4g.log PIDFILE=$PWD/qemu-2cpu4g.pid ./run_qemu.sh
 ```
 
-Then rerun the same ReproC steps and re-check whether `br_handle_frame` appears in the stall stacks.
+然后重复相同的 ReproC 步骤，并再次检查 stall 堆栈里是否出现 `br_handle_frame`。
 
-## Additional reruns (same day)
+## 额外重跑（同日）
 
-### run2 / run3 (SMP=4 MEM=4096)
-Trying `SMP=4 MEM=4096` increased early-boot instability: both runs hit a KASAN `int3` and then
-`Kernel panic - not syncing: Fatal exception in interrupt` before reaching sshd.
+### run2 / run3（SMP=4 MEM=4096）
 
-Artifacts:
+尝试 `SMP=4 MEM=4096` 后，早期启动不稳定性增加：两次都出现 KASAN `int3`，随后在启动到 sshd 之前就触发：
+
+`Kernel panic - not syncing: Fatal exception in interrupt`
+
+产物：
+
 - `repro/f8850bc3986562f79619/qemu-serial-run2.log`
 - `repro/f8850bc3986562f79619/qemu-serial-run3.log`
 
-### run4 (SMP=2 MEM=4096)
-Using 2 vCPUs (original) but more RAM was able to boot to sshd, start the repro, and then
-trigger a stall + watchdog panic:
+### run4（SMP=2 MEM=4096）
 
-- SSH became unresponsive shortly after starting `/root/repro`.
-- Serial log showed `rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:` and later
-	`Kernel panic - not syncing: softlockup: hung tasks`.
+使用 2 个 vCPU（保持与原始一致）但增加内存后，可以启动到 sshd、启动 repro，并触发 stall + watchdog panic：
 
-Artifacts:
+- `/root/repro` 启动后不久 SSH 变得不可用。
+- 串口日志中先出现 `rcu: INFO: rcu_preempt detected stalls on CPUs/tasks:`，之后出现
+  `Kernel panic - not syncing: softlockup: hung tasks`。
+
+产物：
+
 - `repro/f8850bc3986562f79619/qemu-serial-run4.log`
 
-Notes:
-- `br_handle_frame` still did not appear as a string in the captured serial output.
+备注：
+
+- 捕获到的串口输出里，`br_handle_frame` 仍然没有以字符串形式出现。

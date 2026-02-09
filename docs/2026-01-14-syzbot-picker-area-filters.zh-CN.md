@@ -1,28 +1,14 @@
-# 2026-01-14 — Area-focused syzbot picking（简体中文）
+# 2026-01-14 — 面向特定领域的 syzbot 候选挑选
 
 [English](2026-01-14-syzbot-picker-area-filters.md)
 
-> 说明：本简体中文版本包含中文导读 + 英文原文（便于准确对照命令/日志/代码符号）。
+今天我们改进了“挑选候选问题（pick candidates）”的工作流：可以 **有意识地** 针对特定内核领域（例如 cgroup、namespaces、scheduler、GPU/DRM）进行筛选，而不是只依赖通用的“入门问题（starter）”启发式规则。
 
-## 中文导读（章节列表）
+## 变更内容
 
-- What changed
-- Usage examples
-- Notes
+### 1) picker 脚本支持动态过滤
 
-## English 原文
-
-# 2026-01-14 — Area-focused syzbot picking
-
-[简体中文](2026-01-14-syzbot-picker-area-filters.zh-CN.md)
-
-Today we improved the “pick candidates” workflow so we can intentionally target specific kernel areas (e.g. cgroup, namespaces, scheduler, GPU/DRM) instead of only relying on generic “starter” heuristics.
-
-## What changed
-
-### 1) Dynamic filters in the picker scripts
-
-Both pickers now support:
+两个 picker 现在都支持：
 
 - `--include-title-re` / `--exclude-title-re`
   - Regex match against the syzbot bug title (case-insensitive).
@@ -38,13 +24,13 @@ Scripts:
 - `tools/syzbot_pick_top3.py`
 - `tools/syzbot_pick_unclaimed.py`
 
-### 2) Output includes `extid`
+### 2) 输出包含 `extid`
 
-Picker output prints `extid: ...` when present, so we can immediately:
+当页面上存在 extid 时，picker 输出会打印 `extid: ...`，这样我们可以立刻：
 - check lore status with `tools/syzbot_check_in_progress.py --extid <extid>`
 - scaffold a QEMU repro bundle via `tools/syzbot_prepare_qemu_repro.py --extid <extid>`
 
-## Usage examples
+## 用法示例
 
 Pick unclaimed issues (repro required, and skip ones with linked `[PATCH]` threads):
 
@@ -70,7 +56,7 @@ Pick “starter-friendly” issues (repro required, doesn’t check lore in-prog
 ./tools/syzbot_pick_top3.py --count 3 --include-subsystem-re '(cgroup|memcg|namespaces|scheduler)'
 ```
 
-## Notes
+## 备注
 
-- Subsystem names are whatever syzbot labels on the bug page; if you get no hits, try the title regex approach.
-- For GPU bugs: upstream coverage is typically DRM + open drivers (e.g. `amdgpu`, `nouveau`). Proprietary `nvidia` driver issues usually won’t appear as upstream syzbot subsystems.
+- Subsystem 名称以 syzbot bug 页面上的标签为准；如果筛不到结果，尝试改用标题正则的方式。
+- 对于 GPU 相关问题：upstream 覆盖通常是 DRM + 开源驱动（例如 `amdgpu`、`nouveau`）。闭源的 `nvidia` 驱动问题通常不会以 upstream syzbot subsystem 的形式出现。
