@@ -25,6 +25,8 @@ ZH_AREA = {
     "NVIDIA GPU (DRM nouveau)": "NVIDIA GPU（DRM nouveau）",
 }
 
+COMMIT_URL = "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id="
+
 
 def run_git(args: list[str]) -> str:
     return subprocess.check_output(args, text=True, encoding="utf-8", errors="replace")
@@ -45,7 +47,7 @@ def git_log(repo: Path, branch: str, paths: list[str], count: int, no_merges: bo
         branch,
         f"-n{count}",
         "--date=short",
-        "--pretty=format:%h%x1f%ad%x1f%an%x1f%s",
+        "--pretty=format:%h%x1f%H%x1f%ad%x1f%an%x1f%s",
     ]
     if no_merges:
         cmd.append("--no-merges")
@@ -54,16 +56,21 @@ def git_log(repo: Path, branch: str, paths: list[str], count: int, no_merges: bo
     rows = []
     for line in out.splitlines():
         parts = line.split("\x1f")
-        if len(parts) != 4:
+        if len(parts) != 5:
             continue
-        short, date, author, subject = parts
+        short, full, date, author, subject = parts
         rows.append({
             "short": short,
+            "full": full,
             "date": date,
             "author": author,
             "subject": subject,
         })
     return rows
+
+
+def commit_link(full: str) -> str:
+    return f"{COMMIT_URL}{full}"
 
 
 def render_en(date: str, branch: str, no_merges: bool, count: int, repo: Path) -> str:
@@ -85,7 +92,8 @@ def render_en(date: str, branch: str, no_merges: bool, count: int, repo: Path) -
             continue
         lines.append("")
         for c in commits:
-            lines.append(f"- {c['short']} {c['subject']} (by {c['author']}, {c['date']})")
+            link = commit_link(c["full"])
+            lines.append(f"- [{c['short']}]({link}) {c['subject']} (by {c['author']}, {c['date']})")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -109,7 +117,8 @@ def render_zh(date: str, branch: str, no_merges: bool, count: int, repo: Path) -
             continue
         lines.append("")
         for c in commits:
-            lines.append(f"- {c['short']} {c['subject']}（{c['author']}，{c['date']}）")
+            link = commit_link(c["full"])
+            lines.append(f"- [{c['short']}]({link}) {c['subject']}（{c['author']}，{c['date']}）")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
