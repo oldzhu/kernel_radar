@@ -67,6 +67,12 @@ Network/robustness flags:
 - Summarize a lore thread (follow-ups):
   - `./tools/lore_thread_followups.py --help`
 
+## Daily report
+
+- Generate a bilingual daily report for latest commits by area:
+  - `./tools/generate_daily_report.py --date 2026-02-09`
+  - Optional: add `--no-merges` to exclude merge commits
+
 ## Notes
 
 - If you add or change a tool/flag, update this file and add a short dated note under `docs/`.

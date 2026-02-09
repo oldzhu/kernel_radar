@@ -67,6 +67,12 @@ Runner 环境变量（位于 `repro/<extid>/run_qemu.sh`）：
 - 汇总 lore 线程（follow-ups）：
   - `./tools/lore_thread_followups.py --help`
 
+## 每日报告
+
+- 生成按领域划分的双语每日报告：
+  - `./tools/generate_daily_report.py --date 2026-02-09`
+  - 可选：添加 `--no-merges` 以排除 merge 提交
+
 ## 备注
 
 - 如果新增或修改了工具/参数，请更新本文件，并在 `docs/` 下补一条简短的带日期记录。
