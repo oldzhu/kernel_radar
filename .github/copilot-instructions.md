@@ -63,6 +63,7 @@ Notes:
 - Use syzbot/syzkaller bug pages as the source of truth for repro/config links; use lore only via stable thread endpoints/links on bug pages.
 - When network is slow/unreliable, prefer approaches that reduce per-bug HTTP fetches (smaller scan windows, shorter timeouts, cached artifacts if available).
 - Always use the repo virtual environment Python (`./.venv/bin/python`) for running tools/scripts.
+- For any fix work, create a dedicated branch and avoid making code changes directly on `master`.
 
 ## Checklist at the end of a session
 
